@@ -1,0 +1,1435 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EnterprisFlow</title>
+    <link rel="stylesheet" href="css/styles.css">
+    <script type="text/javascript" src="/eel.js"></script>
+</head>
+<body>
+    <div class="container">
+        <!-- Language Toggle & Cloud Sync -->
+        <div class="top-bar">
+            <div class="lang-toggle">
+                <button id="lang-en" class="lang-btn active">English</button>
+                <button id="lang-ar" class="lang-btn">العربية</button>
+            </div>
+            <div class="cloud-sync-bar">
+                <div class="sync-status" id="sync-status">
+                    <span id="sync-indicator" class="sync-indicator">☁️</span>
+                </div>
+                <button id="pull-from-cloud-btn" class="btn btn-small btn-outline" data-i18n="btn_pull" data-i18n-title="title_pull" title="Download from cloud">📥 Pull</button>
+                <button id="push-to-cloud-btn" class="btn btn-small btn-warning" data-i18n="btn_push" data-i18n-title="title_push" title="Upload to cloud (overwrites!)">📤 Push</button>
+                <button id="force-pull-from-cloud-btn" class="btn btn-small btn-danger" data-i18n="btn_force_pull" data-i18n-title="title_force_pull" title="Delete local data and replace with cloud (DANGEROUS!)">⚠️ Force Pull</button>
+            </div>
+        </div>
+
+        <!-- Factory Selector -->
+        <div class="factory-selector">
+            <label for="current-factory" data-i18n="current_factory_label">🏭 Current Factory:</label>
+            <select id="current-factory" class="factory-select">
+                <option value="bahbit" data-i18n="loc_bahbit">Bahbit</option>
+                <option value="old_factory" data-i18n="loc_old_factory">Old Factory</option>
+                <option value="station" data-i18n="loc_station">Station</option>
+                <option value="thaabaneya" data-i18n="loc_thaabaneya">Thaabaneya</option>
+            </select>
+            <span id="factory-context-info" class="factory-context-info" data-i18n="factory_context_info">Viewing stock for this factory only</span>
+        </div>
+
+        <!-- Header -->
+        <header class="header">
+            <span>
+                <h1 data-i18n="app_title">� EnterprisFlow</h1>
+                <p class="subtitle" data-i18n="app_subtitle">Manage inventory, track stock movements, and generate reports</p>
+                <p class="subtitle" style="font-size: 0.7em;">v1.31</p> 
+            </span>
+            <img src="images.png" alt="Company Logo" class="company-logo">
+        </header>
+
+        <!-- Notification Bell Dropdown -->
+        <div id="notification-bell" class="notification-bell hidden">
+            <button id="bell-trigger" class="bell-trigger" aria-label="Notifications">
+                <span class="bell-icon">🔔</span>
+                <span id="notification-count" class="notification-count">0</span>
+            </button>
+            <div id="notifications-dropdown" class="notifications-dropdown">
+                <div class="notifications-header">
+                    <h3>⚠️ <span data-i18n="low_stock_alerts">Low Stock Alerts</span></h3>
+                    <button id="dismiss-notifications" class="btn btn-small btn-outline" data-i18n="btn_dismiss">Dismiss</button>
+                </div>
+                <ul id="notifications-list" class="notifications-list">
+                </ul>
+            </div>
+        </div>
+
+        <!-- Navigation Tabs -->
+        <nav class="tabs">
+            <button class="tab-btn active" data-tab="add-item" data-i18n="tab_add_item">Add/Update Item</button>
+            <button class="tab-btn" data-tab="view-stock" data-i18n="tab_view_stock">View Stock</button>
+            <button class="tab-btn" data-tab="customers" data-i18n="tab_customers">Customers</button>
+            <button class="tab-btn" data-tab="suppliers-ledger" data-i18n="tab_suppliers">Suppliers</button>
+            <button class="tab-btn" data-tab="treasury" data-i18n="tab_treasury">Treasury</button>
+            <button class="tab-btn" data-tab="covenants" data-i18n="tab_covenants">Covenants</button>
+            <button class="tab-btn" data-tab="advances" data-i18n="tab_advances">Advances</button>
+            <button class="tab-btn" data-tab="transactions" data-i18n="tab_transactions">Transaction Log</button>
+        </nav>
+
+        <!-- Tab Content -->
+        <main class="tab-content">
+            
+            <!-- Add/Update Item Tab -->
+            <section id="add-item" class="tab-panel active">
+                <div class="form-container">
+                    <h2 data-i18n="item_entry">Item Entry</h2>
+                    
+                    <!-- ID Check Section -->
+                    <div class="form-group">
+                        <label for="item-id" data-i18n="item_id">Item ID</label>
+                        <div class="id-input-group">
+                            <input type="text" id="item-id" data-i18n-placeholder="placeholder_item_id" placeholder="e.g., ITEM-001" class="input-field">
+                            <button id="check-id-btn" class="btn btn-secondary" data-i18n="btn_check_id">Check ID</button>
+                            <button id="generate-id-btn" class="btn btn-outline" data-i18n="btn_generate_id">Generate ID</button>
+                        </div>
+                        <small class="hint" data-i18n="hint_id_auto">ID will be auto-suggested. You can edit it.</small>
+                    </div>
+
+                    <!-- Status Message -->
+                    <div id="id-status" class="status-message hidden"></div>
+
+                    <!-- New Item Form (shown when item doesn't exist) -->
+                    <div id="new-item-form" class="form-section hidden">
+                        <h3 data-i18n="new_item_details">➕ New Item Details</h3>
+                        
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="item-name" data-i18n="item_name">Item Name *</label>
+                                <input type="text" id="item-name" data-i18n-placeholder="placeholder_item_name" placeholder="Enter item name" class="input-field">
+                            </div>
+                            <div class="form-group">
+                                <label for="item-category" data-i18n="item_category">Category *</label>
+                                <select id="item-category" class="input-field">
+                                    <option value="" data-i18n="select_category">Select category...</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="item-unit" data-i18n="item_unit">Unit *</label>
+                                <select id="item-unit" class="input-field">
+                                    <option value="" data-i18n="select_unit">Select unit...</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="item-location" data-i18n="item_location">Warehouse Location *</label>
+                                <select id="item-location" class="input-field">
+                                    <option value="" data-i18n="select_location">Select location...</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <!-- Internal Transfer Section (for raw_materials and packaging) -->
+                        <div id="internal-transfer-group" class="form-row hidden">
+                            <div class="form-group">
+                                <label for="item-internal-transfer" data-i18n="internal_transfer_to">Internal Transfer To</label>
+                                <select id="item-internal-transfer" class="input-field">
+                                    <option value="" data-i18n="select_no_transfer">No internal transfer</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <small class="hint transfer-hint" data-i18n="hint_internal_transfer">⚠️ If internal transfer is selected, supplier cannot be entered and vice versa.</small>
+                            </div>
+                        </div>
+
+                        <!-- Supplier Section (not for finished_product) -->
+                        <div id="supplier-group" class="form-row hidden">
+                            <div class="form-group">
+                                <label for="item-supplier" data-i18n="item_supplier">Supplier Name *</label>
+                                <input type="text" id="item-supplier" data-i18n-placeholder="placeholder_supplier" placeholder="Enter supplier name" class="input-field">
+                            </div>
+                        </div>
+
+                        <!-- Starting Balance Section -->
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="starting-balance" data-i18n="starting_balance">Starting Balance *</label>
+                                <input type="number" id="starting-balance" data-i18n-placeholder="placeholder_starting_balance" placeholder="Enter initial stock quantity" class="input-field" min="0" step="0.01">
+                            </div>
+                            <div class="form-group">
+                                <label for="starting-balance-date" data-i18n="starting_balance_date">Balance Date (Optional)</label>
+                                <input type="date" id="starting-balance-date" class="input-field">
+                                <small class="hint" data-i18n="hint_balance_date">Leave empty for today's date, or enter a past date for old imports.</small>
+                            </div>
+                        </div>
+
+                        <!-- Price and Min Stock Section (hidden initially) -->
+                        <div id="price-minstock-group" class="form-row hidden">
+                            <div class="form-group">
+                                <label for="item-price" data-i18n="unit_price">Unit Price *</label>
+                                <input type="number" id="item-price" data-i18n-placeholder="placeholder_price" placeholder="Enter unit price" class="input-field" min="0" step="0.01">
+                            </div>
+                            <div class="form-group">
+                                <label for="item-min-stock" data-i18n="min_stock">Minimum Stock Level</label>
+                                <input type="number" id="item-min-stock" data-i18n-placeholder="placeholder_min_stock" placeholder="Alert when stock falls below" class="input-field" min="0" step="0.01">
+                            </div>
+                        </div>
+                        
+                        <small class="hint" data-i18n="hint_starting_balance">This value cannot be changed after item is added.</small>
+
+                        <button id="add-item-btn" class="btn btn-primary btn-large" data-i18n="btn_add_item">Add New Item</button>
+                    </div>
+
+                    <!-- Update Stock Form (shown when item exists) -->
+                    <div id="update-stock-form" class="form-section hidden">
+                        <h3 data-i18n="update_stock">📊 Update Stock</h3>
+                        
+                        <!-- Item Info Display -->
+                        <div id="item-info" class="item-info-card">
+                            <div class="info-row">
+                                <span class="info-label" data-i18n="info_name">Name:</span>
+                                <span id="info-name" class="info-value">-</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label" data-i18n="info_category">Category:</span>
+                                <span id="info-category" class="info-value">-</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label" data-i18n="info_current_stock">Current Stock:</span>
+                                <span id="info-stock" class="info-value highlight">-</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label" data-i18n="info_location">Location:</span>
+                                <span id="info-location" class="info-value">-</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label" data-i18n="info_supplier">Supplier:</span>
+                                <span id="info-supplier" class="info-value">-</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label" data-i18n="info_price">Avg Price:</span>
+                                <span id="info-price" class="info-value">-</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label" data-i18n="info_min_stock">Min Stock:</span>
+                                <span id="info-min-stock" class="info-value">-</span>
+                            </div>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="transaction-type" data-i18n="transaction_type">Transaction Type *</label>
+                                <select id="transaction-type" class="input-field">
+                                    <option value="" data-i18n="select_type">Select type...</option>
+                                    <option value="incoming" data-i18n="type_incoming">📥 Incoming (Add Stock)</option>
+                                    <option value="outgoing" data-i18n="type_outgoing">📤 Outgoing (Remove Stock)</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="quantity" data-i18n="quantity">Quantity *</label>
+                                <input type="number" id="quantity" data-i18n-placeholder="placeholder_quantity" placeholder="Enter quantity" class="input-field" min="0.01" step="0.01">
+                            </div>
+                        </div>
+
+                        <!-- Production Line for Outgoing Stock -->
+                        <div id="outgoing-production-line-group" class="form-group hidden">
+                            <label for="outgoing-production-line" data-i18n="outgoing_production_line">Transfer to Production Line *</label>
+                            <select id="outgoing-production-line" class="input-field">
+                                <option value="" data-i18n="select_production_line">Select production line...</option>
+                                <option value="production_line_1" data-i18n="subloc_production_line_1">Production Line 1</option>
+                                <option value="production_line_2" data-i18n="subloc_production_line_2">Production Line 2</option>
+                                <option value="production_line_3" data-i18n="subloc_production_line_3">Production Line 3</option>
+                                <option value="production_line_4" data-i18n="subloc_production_line_4">Production Line 4</option>
+                            </select>
+                            <small class="hint transfer-hint" data-i18n="hint_production_or_transfer">⚠️ Either production line or internal transfer must be selected (not both).</small>
+                        </div>
+
+                        <!-- Internal Transfer for Outgoing Stock -->
+                        <div id="outgoing-transfer-group" class="form-group hidden">
+                            <label for="outgoing-internal-transfer" data-i18n="outgoing_internal_transfer">Internal Transfer To</label>
+                            <select id="outgoing-internal-transfer" class="input-field">
+                                <option value="" data-i18n="select_no_transfer">No internal transfer</option>
+                            </select>
+                        </div>
+
+                        <!-- Supplier for Incoming Stock -->
+                        <div id="incoming-supplier-group" class="form-group hidden">
+                            <label for="incoming-supplier" data-i18n="incoming_supplier">Supplier for this Shipment *</label>
+                            <input type="text" id="incoming-supplier" data-i18n-placeholder="placeholder_incoming_supplier" placeholder="Enter supplier name for this incoming stock" class="input-field">
+                            <small class="hint transfer-hint" data-i18n="hint_supplier_or_transfer">⚠️ Either supplier or internal transfer must be selected (not both).</small>
+                        </div>
+
+                        <!-- Internal Transfer for Incoming Stock -->
+                        <div id="incoming-transfer-group" class="form-group hidden">
+                            <label for="incoming-internal-transfer" data-i18n="incoming_internal_transfer">Internal Transfer From</label>
+                            <select id="incoming-internal-transfer" class="input-field">
+                                <option value="" data-i18n="select_no_transfer">No internal transfer</option>
+                            </select>
+                        </div>
+
+                        <!-- Transfer From/To Locations -->
+                        <div id="transfer-locations-group" class="form-group hidden">
+                            <label data-i18n="transfer_locations">Transfer Locations *</label>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="transfer-from" data-i18n="transfer_from">From Location *</label>
+                                    <select id="transfer-from" class="input-field">
+                                        <option value="" data-i18n="select_location">Select location...</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label for="transfer-to" data-i18n="transfer_to">To Location *</label>
+                                    <select id="transfer-to" class="input-field">
+                                        <option value="" data-i18n="select_location">Select location...</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Price for Incoming Stock -->
+                        <div id="incoming-price-group" class="form-group hidden">
+                            <label for="incoming-price" data-i18n="shipment_price">Unit Price for this Shipment *</label>
+                            <input type="number" id="incoming-price" data-i18n-placeholder="placeholder_shipment_price" placeholder="Enter unit price for this shipment" class="input-field" min="0" step="0.01">
+                            <small class="hint" data-i18n="hint_price_average">Price will be averaged with existing stock.</small>
+                        </div>
+
+                        <!-- Transaction Date -->
+                        <div id="transaction-date-group" class="form-group hidden">
+                            <label for="transaction-date" data-i18n="transaction_date">Transaction Date</label>
+                            <input type="date" id="transaction-date" class="input-field">
+                            <small class="hint" data-i18n="hint_transaction_date">Leave empty for today's date, or select a past date for older transactions.</small>
+                        </div>
+
+                        <!-- Document Type and Number -->
+                        <div class="form-group">
+                            <label data-i18n="document_info">Document Information</label>
+                            <div class="input-group-flush">
+                                <select id="document-type" class="input-field input-flush-left">
+                                    <option value="" data-i18n="select_document_type">Select document type...</option>
+                                    <option value="purchase_invoice" data-i18n="doc_purchase_invoice">Purchase Invoice</option>
+                                    <option value="sales_invoice" data-i18n="doc_sales_invoice">Sales Invoice</option>
+                                    <option value="raw_materials_order" data-i18n="doc_raw_materials_order">Raw Materials Disbursement</option>
+                                    <option value="finished_product_receipt" data-i18n="doc_finished_product_receipt">Finished Product Receipt</option>
+                                    <option value="internal-transfer" data-i18n="doc_internal_transfer">Internal Transfer</option>
+                                </select>
+                                <input type="text" id="document-number" class="input-field input-flush-right" data-i18n-placeholder="placeholder_document_number" placeholder="Document number...">
+                            </div>
+                        </div>
+
+                        <button id="update-stock-btn" class="btn btn-primary btn-large" data-i18n="btn_update_stock">Update Stock</button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- View Stock Tab -->
+            <section id="view-stock" class="tab-panel">
+                <div class="panel-header">
+                    <h2 data-i18n="current_stock">📋 Current Stock</h2>
+                    <div class="action-buttons">
+                        <button id="refresh-stock-btn" class="btn btn-secondary" data-i18n="btn_refresh">🔄 Refresh</button>
+                        <button id="export-stock-btn" class="btn btn-outline" data-i18n="btn_export">📁 Export CSV</button>
+                        <button id="print-stock-btn" class="btn btn-outline" data-i18n="btn_print">🖨️ Print</button>
+                    </div>
+                </div>
+
+                <!-- Filters -->
+                <div class="filters-container">
+                    <h3 data-i18n="filters">🔍 Filters</h3>
+                    <div class="filters-row">
+                        <div class="filter-group">
+                            <label for="filter-search" data-i18n="filter_search">Search</label>
+                            <input type="text" id="filter-search" data-i18n-placeholder="placeholder_search" placeholder="ID or name..." class="input-field">
+                        </div>
+                        <div class="filter-group">
+                            <label for="filter-category" data-i18n="filter_category">Category</label>
+                            <select id="filter-category" class="input-field">
+                                <option value="" data-i18n="all_categories">All Categories</option>
+                            </select>
+                        </div>
+                        <div class="filter-group">
+                            <label for="filter-supplier" data-i18n="filter_supplier">Supplier</label>
+                            <select id="filter-supplier" class="input-field">
+                                <option value="" data-i18n="all_suppliers">All Suppliers</option>
+                            </select>
+                        </div>
+                        <div class="filter-group">
+                            <label for="filter-location" data-i18n="filter_location">Location</label>
+                            <select id="filter-location" class="input-field">
+                                <option value="" data-i18n="all_locations">All Locations</option>
+                            </select>
+                        </div>
+                        <div class="filter-group">
+                            <label for="filter-unit" data-i18n="filter_unit">Unit</label>
+                            <select id="filter-unit" class="input-field">
+                                <option value="" data-i18n="all_units">All Units</option>
+                            </select>
+                        </div>
+                        <div class="filter-group">
+                            <label for="filter-low-stock" data-i18n="filter_low_stock">Low Stock ≤</label>
+                            <input type="number" id="filter-low-stock" data-i18n-placeholder="placeholder_threshold" placeholder="Threshold" class="input-field" min="0">
+                        </div>
+                        <div class="filter-group filter-actions">
+                            <button id="apply-filters-btn" class="btn btn-secondary" data-i18n="btn_apply">Apply</button>
+                            <button id="clear-filters-btn" class="btn btn-outline" data-i18n="btn_clear">Clear</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Stock Table -->
+                <div class="table-container" id="stock-table-container">
+                    <table class="data-table" id="stock-table">
+                        <thead>
+                            <tr>
+                                <th data-i18n="th_id">ID</th>
+                                <th data-i18n="th_name">Name</th>
+                                <th data-i18n="th_category">Category</th>
+                                <th data-i18n="th_unit">Unit</th>
+                                <th data-i18n="th_location">Location</th>
+                                <th data-i18n="th_supplier">Supplier</th>
+                                <th data-i18n="th_starting">Starting</th>
+                                <th data-i18n="th_in">In</th>
+                                <th data-i18n="th_out">Out</th>
+                                <th data-i18n="th_net_stock">Net Stock</th>
+                                <th data-i18n="th_price">Unit Price</th>
+                                <th data-i18n="th_total_price">Total Value</th>
+                                <th data-i18n="th_min_stock">Min</th>
+                                <th data-i18n="th_last_updated">Updated</th>
+                                <th class="no-print" data-i18n="th_actions">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="stock-table-body">
+                            <tr class="empty-row">
+                                <td colspan="15" data-i18n="no_items">No items found. Add your first item!</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div id="stock-count" class="record-count" data-i18n="showing_items">Showing 0 items</div>
+            </section>
+
+            <!-- Transaction Log Tab -->
+            <section id="transactions" class="tab-panel">
+                <div class="panel-header">
+                    <h2 data-i18n="transaction_log">📜 Transaction Log</h2>
+                    <div class="action-buttons">
+                        <button id="refresh-trans-btn" class="btn btn-secondary" data-i18n="btn_refresh">🔄 Refresh</button>
+                        <button id="export-trans-btn" class="btn btn-outline" data-i18n="btn_export">📁 Export CSV</button>
+                        <button id="print-trans-btn" class="btn btn-outline" data-i18n="btn_print">🖨️ Print</button>
+                    </div>
+                </div>
+
+                <!-- Transaction Filters -->
+                <div class="filters-container">
+                    <h3 data-i18n="filters">🔍 Filters</h3>
+                    <div class="filters-row">
+                        <div class="filter-group">
+                            <label for="trans-filter-source" data-i18n="filter_log_source">Log Source</label>
+                            <select id="trans-filter-source" class="input-field">
+                                <option value="all_ledger" data-i18n="log_source_all_ledger">All Ledger Transactions</option>
+                                <option value="stock" data-i18n="log_source_stock">Stock Transactions</option>
+                                <option value="customers" data-i18n="tab_customers">Customers</option>
+                                <option value="suppliers" data-i18n="tab_suppliers">Suppliers</option>
+                                <option value="treasury" data-i18n="tab_treasury">Treasury</option>
+                                <option value="covenants" data-i18n="tab_covenants">Covenants</option>
+                                <option value="advances" data-i18n="tab_advances">Advances</option>
+                            </select>
+                        </div>
+                        <div class="filter-group keyword-filter-group">
+                            <label for="trans-filter-keyword" data-i18n="filter_keyword">Search Keywords</label>
+                            <div class="keyword-tags-container">
+                                <div id="keyword-tags" class="keyword-tags"></div>
+                                <div class="keyword-input-row">
+                                    <input type="text" id="trans-filter-keyword" data-i18n-placeholder="placeholder_keyword_search" placeholder="Type & press Enter..." class="input-field keyword-input">
+                                    <select id="keyword-logic" class="input-field keyword-logic-select">
+                                        <option value="AND" data-i18n="keyword_and">AND</option>
+                                        <option value="OR" data-i18n="keyword_or">OR</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="filter-group" id="stock-filter-group" style="display: none;">
+                            <label for="trans-filter-id" data-i18n="filter_item_id">Item ID</label>
+                            <input type="text" id="trans-filter-id" data-i18n-placeholder="placeholder_search_id" placeholder="Search by ID..." class="input-field">
+                        </div>
+                        <div class="filter-group" id="local-only-filter-group" style="display: none;">
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="trans-filter-local-only" checked>
+                                <span data-i18n="filter_local_only">Local transactions only</span>
+                            </label>
+                        </div>
+                        <div class="filter-group" style="display: none;">
+                            <label for="trans-filter-type" data-i18n="filter_type">Type</label>
+                            <select id="trans-filter-type" class="input-field">
+                                <option value="" data-i18n="all_types">All Types</option>
+                                <option value="INITIAL" data-i18n="type_initial">Initial</option>
+                                <option value="INCOMING" data-i18n="type_incoming_filter">Incoming</option>
+                                <option value="OUTGOING" data-i18n="type_outgoing_filter">Outgoing</option>
+                                <option value="DELETED" data-i18n="type_deleted">Deleted</option>
+                            </select>
+                        </div>
+                        <div class="filter-group">
+                            <label for="trans-filter-doc-type" data-i18n="filter_document_type">Document Type</label>
+                            <select id="trans-filter-doc-type" class="input-field">
+                                <option value="" data-i18n="all_document_types">All Document Types</option>
+                                <option value="purchase_invoice" data-i18n="doc_purchase_invoice">Purchase Invoice</option>
+                                <option value="sales_invoice" data-i18n="doc_sales_invoice">Sales Invoice</option>
+                                <option value="raw_materials_order" data-i18n="doc_raw_materials_order">Raw Materials Disbursement</option>
+                                <option value="finished_product_receipt" data-i18n="doc_finished_product_receipt">Finished Product Receipt</option>
+                            </select>
+                        </div>
+                        <div class="filter-group">
+                            <label for="trans-filter-doc-number" data-i18n="filter_document_number">Document Number</label>
+                            <input type="text" id="trans-filter-doc-number" data-i18n-placeholder="placeholder_search_doc_number" placeholder="Search by doc number..." class="input-field">
+                        </div>
+                        <div class="filter-group">
+                            <label for="trans-filter-from" data-i18n="filter_date_from">Date From</label>
+                            <input type="date" id="trans-filter-from" class="input-field">
+                        </div>
+                        <div class="filter-group">
+                            <label for="trans-filter-to" data-i18n="filter_date_to">Date To</label>
+                            <input type="date" id="trans-filter-to" class="input-field">
+                        </div>
+                        <div class="filter-group filter-actions">
+                            <button id="apply-trans-filters-btn" class="btn btn-secondary" data-i18n="btn_apply">Apply</button>
+                            <button id="clear-trans-filters-btn" class="btn btn-outline" data-i18n="btn_clear">Clear</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Transactions Table -->
+                <div class="table-container" id="trans-table-container">
+                    <table class="data-table" id="transactions-table">
+                        <thead>
+                            <tr>
+                                <th data-i18n="th_timestamp">Timestamp</th>
+                                <th data-i18n="th_item_id">Item ID</th>
+                                <th data-i18n="th_item_name">Item Name</th>
+                                <th data-i18n="th_type">Type</th>
+                                <th data-i18n="th_quantity">Quantity</th>
+                                <th data-i18n="th_prev_stock">Previous Stock</th>
+                                <th data-i18n="th_new_stock">New Stock</th>
+                                <th data-i18n="th_supplier">Supplier</th>
+                                <th data-i18n="th_document_type">Document Type</th>
+                                <th data-i18n="th_document_number">Document #</th>
+                                <th data-i18n="th_notes">Notes</th>
+                                <th data-i18n="th_actions">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="transactions-table-body">
+                            <tr class="empty-row">
+                                <td colspan="12" data-i18n="no_transactions">No transactions recorded yet.</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div id="trans-count" class="record-count" data-i18n="showing_transactions">Showing 0 transactions</div>
+            </section>
+
+            <!-- Customers Tab -->
+            <section id="customers" class="tab-panel">
+                <div class="form-container">
+                    <h2 data-i18n="customer_entry">👥 Customer Entry</h2>
+                    
+                    <!-- Customers Balance Display -->
+                    <div id="customers-balance-card" class="item-info-card">
+                        <div class="info-row">
+                            <span class="info-label" data-i18n="total_customers_balance">Total Balance:</span>
+                            <span id="customers-total-balance" class="info-value highlight">0.00</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label" data-i18n="total_opening_balance">Total Opening Balance:</span>
+                            <span id="customers-total-opening" class="info-value">0.00</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label" data-i18n="total_debit">Total Debit:</span>
+                            <span id="customers-total-debit" class="info-value">0.00</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label" data-i18n="total_credit">Total Credit:</span>
+                            <span id="customers-total-credit" class="info-value">0.00</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label" data-i18n="total_count">Count:</span>
+                            <span id="customers-balance-count" class="info-value">0</span>
+                        </div>
+                    </div>
+
+                    <!-- Customer ID Check Section -->
+                    <div class="form-group">
+                        <label for="customer-id" data-i18n="customer_id">Customer ID</label>
+                        <div class="id-input-group">
+                            <input type="text" id="customer-id" data-i18n-placeholder="placeholder_customer_id" placeholder="e.g., CUST-001" class="input-field">
+                            <button id="check-customer-id-btn" class="btn btn-secondary" data-i18n="btn_check_id">Check ID</button>
+                            <button id="generate-customer-id-btn" class="btn btn-outline" data-i18n="btn_generate_id">Generate ID</button>
+                        </div>
+                    </div>
+
+                    <!-- Customer Status Message -->
+                    <div id="customer-id-status" class="status-message hidden"></div>
+
+                    <!-- Customer Form -->
+                    <div id="customer-form" class="form-section hidden">
+                        <h3 id="customer-form-title" data-i18n="new_customer_details">➕ New Customer Details</h3>
+                        
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="customer-name" data-i18n="customer_name">Customer Name *</label>
+                                <input type="text" id="customer-name" data-i18n-placeholder="placeholder_customer_name" placeholder="Enter customer name" class="input-field">
+                            </div>
+                            <div class="form-group">
+                                <label for="customer-phone" data-i18n="customer_phone">Phone Number</label>
+                                <input type="text" id="customer-phone" data-i18n-placeholder="placeholder_phone" placeholder="Enter phone number" class="input-field">
+                            </div>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="customer-email" data-i18n="customer_email">Email</label>
+                                <input type="email" id="customer-email" data-i18n-placeholder="placeholder_email" placeholder="Enter email" class="input-field">
+                            </div>
+                            <div class="form-group">
+                                <label for="customer-reg-date" data-i18n="registration_date">Registration Date</label>
+                                <input type="date" id="customer-reg-date" class="input-field">
+                            </div>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="customer-doc-number" data-i18n="document_number">Document Number</label>
+                                <input type="text" id="customer-doc-number" data-i18n-placeholder="placeholder_document_number" placeholder="Document number..." class="input-field">
+                            </div>
+                            <div class="form-group">
+                                <label for="customer-opening-balance" data-i18n="opening_balance">Opening Balance</label>
+                                <input type="number" id="customer-opening-balance" data-i18n-placeholder="placeholder_opening_balance" placeholder="Enter opening balance" class="input-field" min="0" step="0.01">
+                            </div>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="customer-debit" data-i18n="debit">Debit</label>
+                                <input type="number" id="customer-debit" data-i18n-placeholder="placeholder_debit" placeholder="Enter debit amount" class="input-field" min="0" step="0.01">
+                            </div>
+                            <div class="form-group">
+                                <label for="customer-credit" data-i18n="credit">Credit</label>
+                                <input type="number" id="customer-credit" data-i18n-placeholder="placeholder_credit" placeholder="Enter credit amount" class="input-field" min="0" step="0.01">
+                            </div>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="customer-payment-method" data-i18n="payment_method">Payment Method</label>
+                                <select id="customer-payment-method" class="input-field">
+                                    <option value="" data-i18n="select_payment_method">Select payment method...</option>
+                                    <option value="cash" data-i18n="payment_cash">Cash</option>
+                                    <option value="bank_transfer" data-i18n="payment_bank_transfer">Bank Transfer</option>
+                                    <option value="digital_wallet" data-i18n="payment_digital_wallet">Digital Wallet</option>
+                                    <option value="check" data-i18n="payment_check">Check</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="customer-statement" data-i18n="statement">Statement (Details)</label>
+                                <input type="text" id="customer-statement" data-i18n-placeholder="placeholder_statement" placeholder="Enter statement details" class="input-field">
+                            </div>
+                        </div>
+
+                        <button id="save-customer-btn" class="btn btn-primary btn-large" data-i18n="btn_save_customer">Save Customer</button>
+                    </div>
+                </div>
+
+                <!-- Customers Table -->
+                <div class="panel-header">
+                    <h2 data-i18n="customers_list">📋 Customers List</h2>
+                    <div class="action-buttons">
+                        <input type="text" id="customers-search" data-i18n-placeholder="placeholder_search" placeholder="Search customers..." class="input-field search-input">
+                        <button id="refresh-customers-btn" class="btn btn-secondary" data-i18n="btn_refresh">🔄 Refresh</button>
+                        <button id="export-customers-btn" class="btn btn-outline" data-i18n="btn_export">📁 Export CSV</button>
+                        <button id="print-customers-btn" class="btn btn-outline" data-i18n="btn_print">🖨️ Print</button>
+                    </div>
+                </div>
+                <div class="table-container" id="customers-table-container">
+                    <table class="data-table" id="customers-table">
+                        <thead>
+                            <tr>
+                                <th data-i18n="th_id">ID</th>
+                                <th data-i18n="th_name">Name</th>
+                                <th data-i18n="th_phone">Phone</th>
+                                <th data-i18n="th_email">Email</th>
+                                <th data-i18n="th_reg_date">Reg. Date</th>
+                                <th data-i18n="th_doc_number">Doc #</th>
+                                <th data-i18n="th_opening_balance">Opening</th>
+                                <th data-i18n="th_debit">Debit</th>
+                                <th data-i18n="th_credit">Credit</th>
+                                <th data-i18n="th_balance">Balance</th>
+                                <th data-i18n="th_payment_method">Payment</th>
+                                <th data-i18n="th_statement">Statement</th>
+                                <th class="no-print" data-i18n="th_actions">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="customers-table-body">
+                            <tr class="empty-row">
+                                <td colspan="13" data-i18n="no_customers">No customers found. Add your first customer!</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div id="customers-count" class="record-count" data-i18n="showing_customers">Showing 0 customers</div>
+            </section>
+
+            <!-- Suppliers Ledger Tab -->
+            <section id="suppliers-ledger" class="tab-panel">
+                <div class="form-container">
+                    <h2 data-i18n="supplier_entry">🏭 Supplier Entry</h2>
+                    
+                    <!-- Suppliers Balance Display -->
+                    <div id="suppliers-balance-card" class="item-info-card">
+                        <div class="info-row">
+                            <span class="info-label" data-i18n="total_suppliers_balance">Total Balance:</span>
+                            <span id="suppliers-total-balance" class="info-value highlight">0.00</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label" data-i18n="total_opening_balance">Total Opening Balance:</span>
+                            <span id="suppliers-total-opening" class="info-value">0.00</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label" data-i18n="total_debit">Total Debit:</span>
+                            <span id="suppliers-total-debit" class="info-value">0.00</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label" data-i18n="total_credit">Total Credit:</span>
+                            <span id="suppliers-total-credit" class="info-value">0.00</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label" data-i18n="total_count">Count:</span>
+                            <span id="suppliers-balance-count" class="info-value">0</span>
+                        </div>
+                    </div>
+
+                    <!-- Supplier ID Check Section -->
+                    <div class="form-group">
+                        <label for="supplier-id" data-i18n="supplier_id">Supplier ID</label>
+                        <div class="id-input-group">
+                            <input type="text" id="supplier-id" data-i18n-placeholder="placeholder_supplier_id" placeholder="e.g., SUPP-001" class="input-field">
+                            <button id="check-supplier-id-btn" class="btn btn-secondary" data-i18n="btn_check_id">Check ID</button>
+                            <button id="generate-supplier-id-btn" class="btn btn-outline" data-i18n="btn_generate_id">Generate ID</button>
+                        </div>
+                    </div>
+
+                    <!-- Supplier Status Message -->
+                    <div id="supplier-id-status" class="status-message hidden"></div>
+
+                    <!-- Supplier Form -->
+                    <div id="supplier-form" class="form-section hidden">
+                        <h3 id="supplier-form-title" data-i18n="new_supplier_details">➕ New Supplier Details</h3>
+                        
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="supplier-name" data-i18n="supplier_name">Supplier Name *</label>
+                                <input type="text" id="supplier-name" data-i18n-placeholder="placeholder_supplier_name" placeholder="Enter supplier name" class="input-field">
+                            </div>
+                            <div class="form-group">
+                                <label for="supplier-phone" data-i18n="supplier_phone">Phone Number</label>
+                                <input type="text" id="supplier-phone" data-i18n-placeholder="placeholder_phone" placeholder="Enter phone number" class="input-field">
+                            </div>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="supplier-email" data-i18n="supplier_email">Email</label>
+                                <input type="email" id="supplier-email" data-i18n-placeholder="placeholder_email" placeholder="Enter email" class="input-field">
+                            </div>
+                            <div class="form-group">
+                                <label for="supplier-reg-date" data-i18n="registration_date">Registration Date</label>
+                                <input type="date" id="supplier-reg-date" class="input-field">
+                            </div>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="supplier-doc-number" data-i18n="document_number">Document Number</label>
+                                <input type="text" id="supplier-doc-number" data-i18n-placeholder="placeholder_document_number" placeholder="Document number..." class="input-field">
+                            </div>
+                            <div class="form-group">
+                                <label for="supplier-opening-balance" data-i18n="opening_balance">Opening Balance</label>
+                                <input type="number" id="supplier-opening-balance" data-i18n-placeholder="placeholder_opening_balance" placeholder="Enter opening balance" class="input-field" min="0" step="0.01">
+                            </div>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="supplier-debit" data-i18n="debit">Debit</label>
+                                <input type="number" id="supplier-debit" data-i18n-placeholder="placeholder_debit" placeholder="Enter debit amount" class="input-field" min="0" step="0.01">
+                            </div>
+                            <div class="form-group">
+                                <label for="supplier-credit" data-i18n="credit">Credit</label>
+                                <input type="number" id="supplier-credit" data-i18n-placeholder="placeholder_credit" placeholder="Enter credit amount" class="input-field" min="0" step="0.01">
+                            </div>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="supplier-payment-method" data-i18n="payment_method">Payment Method</label>
+                                <select id="supplier-payment-method" class="input-field">
+                                    <option value="" data-i18n="select_payment_method">Select payment method...</option>
+                                    <option value="cash" data-i18n="payment_cash">Cash</option>
+                                    <option value="bank_transfer" data-i18n="payment_bank_transfer">Bank Transfer</option>
+                                    <option value="digital_wallet" data-i18n="payment_digital_wallet">Digital Wallet</option>
+                                    <option value="check" data-i18n="payment_check">Check</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="supplier-statement" data-i18n="statement">Statement (Details)</label>
+                                <input type="text" id="supplier-statement" data-i18n-placeholder="placeholder_statement" placeholder="Enter statement details" class="input-field">
+                            </div>
+                        </div>
+
+                        <button id="save-supplier-btn" class="btn btn-primary btn-large" data-i18n="btn_save_supplier">Save Supplier</button>
+                    </div>
+                </div>
+
+                <!-- Suppliers Table -->
+                <div class="panel-header">
+                    <h2 data-i18n="suppliers_list">📋 Suppliers List</h2>
+                    <div class="action-buttons">
+                        <input type="text" id="suppliers-search" data-i18n-placeholder="placeholder_search" placeholder="Search suppliers..." class="input-field search-input">
+                        <button id="refresh-suppliers-btn" class="btn btn-secondary" data-i18n="btn_refresh">🔄 Refresh</button>
+                        <button id="export-suppliers-btn" class="btn btn-outline" data-i18n="btn_export">📁 Export CSV</button>
+                        <button id="print-suppliers-btn" class="btn btn-outline" data-i18n="btn_print">🖨️ Print</button>
+                    </div>
+                </div>
+                <div class="table-container" id="suppliers-table-container">
+                    <table class="data-table" id="suppliers-table">
+                        <thead>
+                            <tr>
+                                <th data-i18n="th_id">ID</th>
+                                <th data-i18n="th_name">Name</th>
+                                <th data-i18n="th_phone">Phone</th>
+                                <th data-i18n="th_email">Email</th>
+                                <th data-i18n="th_reg_date">Reg. Date</th>
+                                <th data-i18n="th_doc_number">Doc #</th>
+                                <th data-i18n="th_opening_balance">Opening</th>
+                                <th data-i18n="th_debit">Debit</th>
+                                <th data-i18n="th_credit">Credit</th>
+                                <th data-i18n="th_balance">Balance</th>
+                                <th data-i18n="th_payment_method">Payment</th>
+                                <th data-i18n="th_statement">Statement</th>
+                                <th class="no-print" data-i18n="th_actions">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="suppliers-table-body">
+                            <tr class="empty-row">
+                                <td colspan="13" data-i18n="no_suppliers">No suppliers found. Add your first supplier!</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div id="suppliers-count" class="record-count" data-i18n="showing_suppliers">Showing 0 suppliers</div>
+            </section>
+
+            <!-- Treasury Tab -->
+            <section id="treasury" class="tab-panel">
+                <div class="form-container">
+                    <h2 data-i18n="treasury_entry">💰 Treasury Entry</h2>
+                    
+                    <!-- Treasury Initialization Warning (shown when not initialized) -->
+                    <div id="treasury-init-warning" class="init-warning-card hidden">
+                        <div class="init-warning-icon">⚠️</div>
+                        <div class="init-warning-content">
+                            <h3 data-i18n="treasury_not_initialized">Treasury Not Initialized</h3>
+                            <p data-i18n="treasury_init_description">The treasury has not been initialized with a starting capital. Initialize the treasury to start tracking your cash flow properly.</p>
+                            <button id="show-init-form-btn" class="btn btn-primary" data-i18n="btn_initialize_treasury">Initialize Treasury</button>
+                        </div>
+                    </div>
+
+                    <!-- Treasury Initialization Form (hidden by default) -->
+                    <div id="treasury-init-form" class="form-section hidden">
+                        <h3 data-i18n="initialize_treasury_title">🏦 Initialize Treasury</h3>
+                        <p class="form-description" data-i18n="init_treasury_help">Set the starting capital for your treasury. This represents the initial cash available and cannot be changed after initialization (adjustments can be made via transactions).</p>
+                        
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="init-starting-capital" data-i18n="starting_capital">Starting Capital *</label>
+                                <input type="number" id="init-starting-capital" data-i18n-placeholder="placeholder_starting_capital" placeholder="Enter starting capital..." class="input-field" min="0" step="0.01" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="init-currency" data-i18n="currency">Currency</label>
+                                <select id="init-currency" class="input-field">
+                                    <option value="EGP" selected>EGP - Egyptian Pound</option>
+                                    <option value="USD">USD - US Dollar</option>
+                                    <option value="EUR">EUR - Euro</option>
+                                    <option value="SAR">SAR - Saudi Riyal</option>
+                                    <option value="AED">AED - UAE Dirham</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="init-fiscal-year" data-i18n="fiscal_year_start">Fiscal Year Start</label>
+                                <input type="date" id="init-fiscal-year" class="input-field">
+                            </div>
+                            <div class="form-group">
+                                <label for="init-notes" data-i18n="initialization_notes">Notes</label>
+                                <input type="text" id="init-notes" data-i18n-placeholder="placeholder_init_notes" placeholder="Optional notes..." class="input-field">
+                            </div>
+                        </div>
+
+                        <div class="form-actions">
+                            <button id="confirm-init-treasury-btn" class="btn btn-primary" data-i18n="btn_confirm_initialize">Confirm Initialization</button>
+                            <button id="cancel-init-treasury-btn" class="btn btn-outline" data-i18n="btn_cancel">Cancel</button>
+                        </div>
+                    </div>
+
+                    <!-- Treasury Summary Card (shown when initialized) -->
+                    <div id="treasury-summary-card" class="treasury-summary-card hidden">
+                        <div class="summary-header">
+                            <span class="init-status initialized" data-i18n="treasury_initialized">✅ Treasury Initialized</span>
+                            <span id="treasury-init-date" class="init-date"></span>
+                        </div>
+                        <div class="summary-grid">
+                            <div class="summary-item starting-capital">
+                                <span class="summary-label" data-i18n="starting_capital">Starting Capital</span>
+                                <span id="treasury-starting-capital" class="summary-value">0.00</span>
+                            </div>
+                            <div class="summary-item current-position">
+                                <span class="summary-label" data-i18n="current_treasury_position">Current Position</span>
+                                <span id="treasury-current-position" class="summary-value highlight">0.00</span>
+                            </div>
+                            <div class="summary-item net-change">
+                                <span class="summary-label" data-i18n="net_change">Net Change</span>
+                                <span id="treasury-net-change" class="summary-value">0.00</span>
+                            </div>
+                            <div class="summary-item currency">
+                                <span class="summary-label" data-i18n="currency">Currency</span>
+                                <span id="treasury-currency" class="summary-value">EGP</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Treasury Balance Display (Account Totals) -->
+                    <div id="treasury-balance-card" class="item-info-card">
+                        <h4 data-i18n="accounts_summary">📊 Accounts Summary</h4>
+                        <div class="info-row">
+                            <span class="info-label" data-i18n="total_treasury_balance">Total Balance:</span>
+                            <span id="treasury-total-balance" class="info-value highlight">0.00</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label" data-i18n="total_opening_balance">Total Opening Balance:</span>
+                            <span id="treasury-total-opening" class="info-value">0.00</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label" data-i18n="total_debit">Total Debit:</span>
+                            <span id="treasury-total-debit" class="info-value">0.00</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label" data-i18n="total_credit">Total Credit:</span>
+                            <span id="treasury-total-credit" class="info-value">0.00</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label" data-i18n="total_count">Count:</span>
+                            <span id="treasury-balance-count" class="info-value">0</span>
+                        </div>
+                    </div>
+
+                    <!-- Treasury Account Number Check Section -->
+                    <div id="treasury-entry-section">
+                        <div class="form-group">
+                            <label for="treasury-account-number" data-i18n="account_number">Account Number</label>
+                            <div class="id-input-group">
+                                <input type="text" id="treasury-account-number" data-i18n-placeholder="placeholder_account_number" placeholder="Enter account number..." class="input-field">
+                                <button id="check-treasury-account-btn" class="btn btn-secondary" data-i18n="btn_check_account">Check Account</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Treasury Status Message -->
+                    <div id="treasury-account-status" class="status-message hidden"></div>
+
+                    <!-- Treasury Form -->
+                    <div id="treasury-form" class="form-section hidden">
+                        <h3 id="treasury-form-title" data-i18n="new_treasury_account">➕ New Treasury Account</h3>
+                        
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="treasury-account-name" data-i18n="account_name">Account Name</label>
+                                <input type="text" id="treasury-account-name" data-i18n-placeholder="placeholder_account_name" placeholder="Enter account name..." class="input-field">
+                            </div>
+                            <div class="form-group">
+                                <label for="treasury-reg-date" data-i18n="registration_date">Registration Date</label>
+                                <input type="date" id="treasury-reg-date" class="input-field">
+                            </div>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="treasury-doc-number" data-i18n="document_number">Document Number</label>
+                                <input type="text" id="treasury-doc-number" data-i18n-placeholder="placeholder_document_number" placeholder="Document number..." class="input-field">
+                            </div>
+                            <div class="form-group" id="treasury-opening-group">
+                                <label for="treasury-opening-balance" data-i18n="opening_balance">Opening Balance</label>
+                                <input type="number" id="treasury-opening-balance" data-i18n-placeholder="placeholder_opening_balance" placeholder="Enter opening balance" class="input-field" step="0.01">
+                            </div>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="treasury-debit" data-i18n="debit">Debit (Money In)</label>
+                                <input type="number" id="treasury-debit" data-i18n-placeholder="placeholder_debit" placeholder="Enter debit amount" class="input-field" min="0" step="0.01">
+                            </div>
+                            <div class="form-group">
+                                <label for="treasury-credit" data-i18n="credit">Credit (Money Out)</label>
+                                <input type="number" id="treasury-credit" data-i18n-placeholder="placeholder_credit" placeholder="Enter credit amount" class="input-field" min="0" step="0.01">
+                            </div>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="treasury-payment-method" data-i18n="payment_method">Payment Method</label>
+                                <select id="treasury-payment-method" class="input-field">
+                                    <option value="" data-i18n="select_payment_method">Select payment method...</option>
+                                    <option value="cash" data-i18n="payment_cash">Cash</option>
+                                    <option value="bank_transfer" data-i18n="payment_bank_transfer">Bank Transfer</option>
+                                    <option value="digital_wallet" data-i18n="payment_digital_wallet">Digital Wallet</option>
+                                    <option value="check" data-i18n="payment_check">Check</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="treasury-statement" data-i18n="statement">Statement (Details)</label>
+                                <input type="text" id="treasury-statement" data-i18n-placeholder="placeholder_statement" placeholder="Enter statement details" class="input-field">
+                            </div>
+                        </div>
+
+                        <button id="save-treasury-btn" class="btn btn-primary btn-large" data-i18n="btn_save_treasury">Save Treasury Account</button>
+                    </div>
+                </div>
+
+                <!-- Treasury Filters -->
+                <div class="filters-container">
+                    <h3 data-i18n="filters">🔍 Filters</h3>
+                    <div class="filters-row">
+                        <div class="filter-group keyword-filter-group">
+                            <label for="treasury-filter-keyword" data-i18n="filter_keyword">Search Keywords</label>
+                            <div class="keyword-tags-container">
+                                <div id="treasury-keyword-tags" class="keyword-tags"></div>
+                                <div class="keyword-input-row">
+                                    <input type="text" id="treasury-filter-keyword" data-i18n-placeholder="placeholder_keyword_search" placeholder="Type & press Enter..." class="input-field keyword-input">
+                                    <select id="treasury-keyword-logic" class="input-field keyword-logic-select">
+                                        <option value="AND" data-i18n="keyword_and">AND</option>
+                                        <option value="OR" data-i18n="keyword_or">OR</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="filter-group">
+                            <label for="treasury-filter-account" data-i18n="filter_account_number">Account Number</label>
+                            <input type="text" id="treasury-filter-account" data-i18n-placeholder="placeholder_search_account" placeholder="Search by account #..." class="input-field">
+                        </div>
+                        <div class="filter-group">
+                            <label for="treasury-filter-name" data-i18n="filter_account_name">Account Name</label>
+                            <input type="text" id="treasury-filter-name" data-i18n-placeholder="placeholder_search_name" placeholder="Search by name..." class="input-field">
+                        </div>
+                        <div class="filter-group">
+                            <label for="treasury-filter-doc" data-i18n="filter_document_number">Document Number</label>
+                            <input type="text" id="treasury-filter-doc" data-i18n-placeholder="placeholder_search_doc_number" placeholder="Search by doc #..." class="input-field">
+                        </div>
+                        <div class="filter-group">
+                            <label for="treasury-filter-payment" data-i18n="filter_payment_method">Payment Method</label>
+                            <select id="treasury-filter-payment" class="input-field">
+                                <option value="" data-i18n="all_payment_methods">All Payment Methods</option>
+                                <option value="cash" data-i18n="payment_cash">Cash</option>
+                                <option value="bank_transfer" data-i18n="payment_bank_transfer">Bank Transfer</option>
+                                <option value="digital_wallet" data-i18n="payment_digital_wallet">Digital Wallet</option>
+                                <option value="check" data-i18n="payment_check">Check</option>
+                            </select>
+                        </div>
+                        <div class="filter-group">
+                            <label for="treasury-filter-date-from" data-i18n="filter_date_from">Date From</label>
+                            <input type="date" id="treasury-filter-date-from" class="input-field">
+                        </div>
+                        <div class="filter-group">
+                            <label for="treasury-filter-date-to" data-i18n="filter_date_to">Date To</label>
+                            <input type="date" id="treasury-filter-date-to" class="input-field">
+                        </div>
+                        <div class="filter-group">
+                            <label for="treasury-filter-statement" data-i18n="filter_statement">Statement</label>
+                            <input type="text" id="treasury-filter-statement" data-i18n-placeholder="placeholder_search_statement" placeholder="Search statement..." class="input-field">
+                        </div>
+                        <div class="filter-group filter-actions">
+                            <button id="apply-treasury-filters-btn" class="btn btn-secondary" data-i18n="btn_apply">Apply</button>
+                            <button id="clear-treasury-filters-btn" class="btn btn-outline" data-i18n="btn_clear">Clear</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Treasury Table -->
+                <div class="panel-header">
+                    <h2 data-i18n="treasury_list">📋 Treasury Accounts</h2>
+                    <div class="action-buttons">
+                        <button id="refresh-treasury-btn" class="btn btn-secondary" data-i18n="btn_refresh">🔄 Refresh</button>
+                        <button id="export-treasury-btn" class="btn btn-outline" data-i18n="btn_export">📁 Export CSV</button>
+                        <button id="print-treasury-btn" class="btn btn-outline" data-i18n="btn_print">🖨️ Print</button>
+                    </div>
+                </div>
+                <div class="table-container" id="treasury-table-container">
+                    <table class="data-table" id="treasury-table">
+                        <thead>
+                            <tr>
+                                <th data-i18n="th_account_number">Account #</th>
+                                <th data-i18n="th_account_name">Account Name</th>
+                                <th data-i18n="th_reg_date">Reg. Date</th>
+                                <th data-i18n="th_doc_number">Doc #</th>
+                                <th data-i18n="th_opening_balance">Opening</th>
+                                <th data-i18n="th_debit">Debit</th>
+                                <th data-i18n="th_credit">Credit</th>
+                                <th data-i18n="th_balance">Balance</th>
+                                <th data-i18n="th_payment_method">Payment</th>
+                                <th data-i18n="th_statement">Statement</th>
+                                <th class="no-print" data-i18n="th_actions">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="treasury-table-body">
+                            <tr class="empty-row">
+                                <td colspan="11" data-i18n="no_treasury">No treasury accounts found.</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div id="treasury-count" class="record-count" data-i18n="showing_treasury">Showing 0 accounts</div>
+            </section>
+
+            <!-- Covenants Tab -->
+            <section id="covenants" class="tab-panel">
+                <div class="form-container">
+                    <h2 data-i18n="covenant_entry">📝 Covenant Entry</h2>
+                    
+                    <!-- Covenants Balance Display -->
+                    <div id="covenants-balance-card" class="item-info-card">
+                        <div class="info-row">
+                            <span class="info-label" data-i18n="total_covenants_balance">Total Balance:</span>
+                            <span id="covenants-total-balance" class="info-value highlight">0.00</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label" data-i18n="total_opening_balance">Total Opening Balance:</span>
+                            <span id="covenants-total-opening" class="info-value">0.00</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label" data-i18n="total_debit">Total Debit:</span>
+                            <span id="covenants-total-debit" class="info-value">0.00</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label" data-i18n="total_credit">Total Credit:</span>
+                            <span id="covenants-total-credit" class="info-value">0.00</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label" data-i18n="total_count">Count:</span>
+                            <span id="covenants-balance-count" class="info-value">0</span>
+                        </div>
+                    </div>
+
+                    <!-- Covenant ID Check Section -->
+                    <div class="form-group">
+                        <label for="covenant-id" data-i18n="covenant_id">Covenant ID</label>
+                        <div class="id-input-group">
+                            <input type="text" id="covenant-id" data-i18n-placeholder="placeholder_covenant_id" placeholder="e.g., COV-001" class="input-field">
+                            <button id="check-covenant-id-btn" class="btn btn-secondary" data-i18n="btn_check_id">Check ID</button>
+                            <button id="generate-covenant-id-btn" class="btn btn-outline" data-i18n="btn_generate_id">Generate ID</button>
+                        </div>
+                    </div>
+
+                    <!-- Covenant Status Message -->
+                    <div id="covenant-id-status" class="status-message hidden"></div>
+
+                    <!-- Covenant Form -->
+                    <div id="covenant-form" class="form-section hidden">
+                        <h3 id="covenant-form-title" data-i18n="new_covenant_details">➕ New Covenant Details</h3>
+                        
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="covenant-employee-name" data-i18n="employee_name">Employee Name *</label>
+                                <input type="text" id="covenant-employee-name" data-i18n-placeholder="placeholder_employee_name" placeholder="Enter employee name" class="input-field">
+                            </div>
+                            <div class="form-group">
+                                <label for="covenant-phone" data-i18n="employee_phone">Phone Number</label>
+                                <input type="text" id="covenant-phone" data-i18n-placeholder="placeholder_phone" placeholder="Enter phone number" class="input-field">
+                            </div>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="covenant-reg-date" data-i18n="registration_date">Registration Date</label>
+                                <input type="date" id="covenant-reg-date" class="input-field">
+                            </div>
+                            <div class="form-group">
+                                <label for="covenant-doc-number" data-i18n="document_number">Document Number</label>
+                                <input type="text" id="covenant-doc-number" data-i18n-placeholder="placeholder_document_number" placeholder="Document number..." class="input-field">
+                            </div>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="covenant-opening-balance" data-i18n="opening_balance">Opening Balance</label>
+                                <input type="number" id="covenant-opening-balance" data-i18n-placeholder="placeholder_opening_balance" placeholder="Enter opening balance" class="input-field" min="0" step="0.01">
+                            </div>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="covenant-debit" data-i18n="debit">Debit</label>
+                                <input type="number" id="covenant-debit" data-i18n-placeholder="placeholder_debit" placeholder="Enter debit amount" class="input-field" min="0" step="0.01">
+                            </div>
+                            <div class="form-group">
+                                <label for="covenant-credit" data-i18n="credit">Credit</label>
+                                <input type="number" id="covenant-credit" data-i18n-placeholder="placeholder_credit" placeholder="Enter credit amount" class="input-field" min="0" step="0.01">
+                            </div>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="covenant-payment-method" data-i18n="payment_method">Payment Method</label>
+                                <select id="covenant-payment-method" class="input-field">
+                                    <option value="" data-i18n="select_payment_method">Select payment method...</option>
+                                    <option value="cash" data-i18n="payment_cash">Cash</option>
+                                    <option value="bank_transfer" data-i18n="payment_bank_transfer">Bank Transfer</option>
+                                    <option value="digital_wallet" data-i18n="payment_digital_wallet">Digital Wallet</option>
+                                    <option value="check" data-i18n="payment_check">Check</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="covenant-statement" data-i18n="statement">Statement (Details)</label>
+                                <input type="text" id="covenant-statement" data-i18n-placeholder="placeholder_statement" placeholder="Enter statement details" class="input-field">
+                            </div>
+                        </div>
+
+                        <button id="save-covenant-btn" class="btn btn-primary btn-large" data-i18n="btn_save_covenant">Save Covenant</button>
+                    </div>
+                </div>
+
+                <!-- Covenants Table -->
+                <div class="panel-header">
+                    <h2 data-i18n="covenants_list">📋 Covenants List</h2>
+                    <div class="action-buttons">
+                        <input type="text" id="covenants-search" data-i18n-placeholder="placeholder_search" placeholder="Search covenants..." class="input-field search-input">
+                        <button id="refresh-covenants-btn" class="btn btn-secondary" data-i18n="btn_refresh">🔄 Refresh</button>
+                        <button id="export-covenants-btn" class="btn btn-outline" data-i18n="btn_export">📁 Export CSV</button>
+                        <button id="print-covenants-btn" class="btn btn-outline" data-i18n="btn_print">🖨️ Print</button>
+                    </div>
+                </div>
+                <div class="table-container" id="covenants-table-container">
+                    <table class="data-table" id="covenants-table">
+                        <thead>
+                            <tr>
+                                <th data-i18n="th_id">ID</th>
+                                <th data-i18n="th_employee_name">Employee Name</th>
+                                <th data-i18n="th_phone">Phone</th>
+                                <th data-i18n="th_reg_date">Reg. Date</th>
+                                <th data-i18n="th_doc_number">Doc #</th>
+                                <th data-i18n="th_opening_balance">Opening</th>
+                                <th data-i18n="th_debit">Debit</th>
+                                <th data-i18n="th_credit">Credit</th>
+                                <th data-i18n="th_balance">Balance</th>
+                                <th data-i18n="th_payment_method">Payment</th>
+                                <th data-i18n="th_statement">Statement</th>
+                                <th class="no-print" data-i18n="th_actions">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="covenants-table-body">
+                            <tr class="empty-row">
+                                <td colspan="12" data-i18n="no_covenants">No covenants found. Add your first covenant!</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div id="covenants-count" class="record-count" data-i18n="showing_covenants">Showing 0 covenants</div>
+            </section>
+
+            <!-- Advances Tab -->
+            <section id="advances" class="tab-panel">
+                <div class="form-container">
+                    <h2 data-i18n="advance_entry">💵 Advance Entry</h2>
+                    
+                    <!-- Advances Balance Display -->
+                    <div id="advances-balance-card" class="item-info-card">
+                        <div class="info-row">
+                            <span class="info-label" data-i18n="total_advances_balance">Total Balance:</span>
+                            <span id="advances-total-balance" class="info-value highlight">0.00</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label" data-i18n="total_opening_balance">Total Opening Balance:</span>
+                            <span id="advances-total-opening" class="info-value">0.00</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label" data-i18n="total_debit">Total Debit:</span>
+                            <span id="advances-total-debit" class="info-value">0.00</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label" data-i18n="total_credit">Total Credit:</span>
+                            <span id="advances-total-credit" class="info-value">0.00</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label" data-i18n="total_count">Count:</span>
+                            <span id="advances-balance-count" class="info-value">0</span>
+                        </div>
+                    </div>
+
+                    <!-- Advance ID Check Section -->
+                    <div class="form-group">
+                        <label for="advance-id" data-i18n="advance_id">Advance ID</label>
+                        <div class="id-input-group">
+                            <input type="text" id="advance-id" data-i18n-placeholder="placeholder_advance_id" placeholder="e.g., ADV-001" class="input-field">
+                            <button id="check-advance-id-btn" class="btn btn-secondary" data-i18n="btn_check_id">Check ID</button>
+                            <button id="generate-advance-id-btn" class="btn btn-outline" data-i18n="btn_generate_id">Generate ID</button>
+                        </div>
+                    </div>
+
+                    <!-- Advance Status Message -->
+                    <div id="advance-id-status" class="status-message hidden"></div>
+
+                    <!-- Advance Form -->
+                    <div id="advance-form" class="form-section hidden">
+                        <h3 id="advance-form-title" data-i18n="new_advance_details">➕ New Advance Details</h3>
+                        
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="advance-employee-name" data-i18n="employee_name">Employee Name *</label>
+                                <input type="text" id="advance-employee-name" data-i18n-placeholder="placeholder_employee_name" placeholder="Enter employee name" class="input-field">
+                            </div>
+                            <div class="form-group">
+                                <label for="advance-phone" data-i18n="employee_phone">Phone Number</label>
+                                <input type="text" id="advance-phone" data-i18n-placeholder="placeholder_phone" placeholder="Enter phone number" class="input-field">
+                            </div>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="advance-reg-date" data-i18n="registration_date">Registration Date</label>
+                                <input type="date" id="advance-reg-date" class="input-field">
+                            </div>
+                            <div class="form-group">
+                                <label for="advance-doc-number" data-i18n="document_number">Document Number</label>
+                                <input type="text" id="advance-doc-number" data-i18n-placeholder="placeholder_document_number" placeholder="Document number..." class="input-field">
+                            </div>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="advance-opening-balance" data-i18n="opening_balance">Opening Balance</label>
+                                <input type="number" id="advance-opening-balance" data-i18n-placeholder="placeholder_opening_balance" placeholder="Enter opening balance" class="input-field" min="0" step="0.01">
+                            </div>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="advance-debit" data-i18n="debit">Debit</label>
+                                <input type="number" id="advance-debit" data-i18n-placeholder="placeholder_debit" placeholder="Enter debit amount" class="input-field" min="0" step="0.01">
+                            </div>
+                            <div class="form-group">
+                                <label for="advance-credit" data-i18n="credit">Credit</label>
+                                <input type="number" id="advance-credit" data-i18n-placeholder="placeholder_credit" placeholder="Enter credit amount" class="input-field" min="0" step="0.01">
+                            </div>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="advance-payment-method" data-i18n="payment_method">Payment Method</label>
+                                <select id="advance-payment-method" class="input-field">
+                                    <option value="" data-i18n="select_payment_method">Select payment method...</option>
+                                    <option value="cash" data-i18n="payment_cash">Cash</option>
+                                    <option value="bank_transfer" data-i18n="payment_bank_transfer">Bank Transfer</option>
+                                    <option value="digital_wallet" data-i18n="payment_digital_wallet">Digital Wallet</option>
+                                    <option value="check" data-i18n="payment_check">Check</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="advance-statement" data-i18n="statement">Statement (Details)</label>
+                                <input type="text" id="advance-statement" data-i18n-placeholder="placeholder_statement" placeholder="Enter statement details" class="input-field">
+                            </div>
+                        </div>
+
+                        <button id="save-advance-btn" class="btn btn-primary btn-large" data-i18n="btn_save_advance">Save Advance</button>
+                    </div>
+                </div>
+
+                <!-- Advances Table -->
+                <div class="panel-header">
+                    <h2 data-i18n="advances_list">📋 Advances List</h2>
+                    <div class="action-buttons">
+                        <input type="text" id="advances-search" data-i18n-placeholder="placeholder_search" placeholder="Search advances..." class="input-field search-input">
+                        <button id="refresh-advances-btn" class="btn btn-secondary" data-i18n="btn_refresh">🔄 Refresh</button>
+                        <button id="export-advances-btn" class="btn btn-outline" data-i18n="btn_export">📁 Export CSV</button>
+                        <button id="print-advances-btn" class="btn btn-outline" data-i18n="btn_print">🖨️ Print</button>
+                    </div>
+                </div>
+                <div class="table-container" id="advances-table-container">
+                    <table class="data-table" id="advances-table">
+                        <thead>
+                            <tr>
+                                <th data-i18n="th_id">ID</th>
+                                <th data-i18n="th_employee_name">Employee Name</th>
+                                <th data-i18n="th_phone">Phone</th>
+                                <th data-i18n="th_reg_date">Reg. Date</th>
+                                <th data-i18n="th_doc_number">Doc #</th>
+                                <th data-i18n="th_opening_balance">Opening</th>
+                                <th data-i18n="th_debit">Debit</th>
+                                <th data-i18n="th_credit">Credit</th>
+                                <th data-i18n="th_balance">Balance</th>
+                                <th data-i18n="th_payment_method">Payment</th>
+                                <th data-i18n="th_statement">Statement</th>
+                                <th class="no-print" data-i18n="th_actions">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="advances-table-body">
+                            <tr class="empty-row">
+                                <td colspan="12" data-i18n="no_advances">No advances found. Add your first advance!</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div id="advances-count" class="record-count" data-i18n="showing_advances">Showing 0 advances</div>
+            </section>
+        </main>
+
+        <!-- Message Toast -->
+        <div id="toast" class="toast hidden">
+            <span id="toast-message"></span>
+        </div>
+
+        <!-- Export Options Modal -->
+        <div id="export-modal" class="modal hidden">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3 data-i18n="export_options">Export Options</h3>
+                    <button id="close-export-modal" class="modal-close">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <p data-i18n="select_columns">Select columns to export:</p>
+                    <div class="modal-actions-top">
+                        <button id="select-all-cols" class="btn btn-small btn-outline" data-i18n="select_all">Select All</button>
+                        <button id="deselect-all-cols" class="btn btn-small btn-outline" data-i18n="deselect_all">Deselect All</button>
+                    </div>
+                    <div id="export-columns-list" class="checkbox-list">
+                        <!-- Columns will be populated dynamically -->
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button id="cancel-export-btn" class="btn btn-outline" data-i18n="btn_cancel">Cancel</button>
+                    <button id="confirm-export-btn" class="btn btn-primary" data-i18n="btn_export_selected">Export Selected</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <footer class="app-footer">
+            <p class="footer-contact" data-i18n="footer_contact">Need more features? Contact: 01157019062</p>
+        </footer>
+    </div>
+
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore-compat.js"></script>
+    
+    <!-- App Scripts -->
+    <script src="js/firebase-config.js"></script>
+    <script src="js/firebase-sync.js"></script>
+    <script src="js/i18n.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>
