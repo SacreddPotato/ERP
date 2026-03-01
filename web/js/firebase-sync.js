@@ -12,9 +12,7 @@ const FirebaseSync = {
     syncInProgress: false,
     lastSyncTime: null,
     lastPullTime: null,
-    autoPullInterval: null,
-    listeners: [],
-    AUTO_PULL_INTERVAL_MS: 60000 // Pull every 60 seconds
+    lastSyncTimestamp: null // For incremental sync - only pull items modified after this
 };
 
 // ============================================
@@ -34,19 +32,23 @@ function initFirebaseSync() {
     }
     
     FirebaseSync.isEnabled = true;
-    console.log('✅ Firebase sync enabled');
+    console.log('✅ Firebase sync enabled (optimized - no real-time listeners)');
     
     // Set up button listeners
     setupSyncButtons();
     
-    // Start real-time listeners
-    startRealtimeListeners();
+    // Load last sync timestamp from localStorage
+    const savedTimestamp = localStorage.getItem('firebase_last_sync_timestamp');
+    if (savedTimestamp) {
+        FirebaseSync.lastSyncTimestamp = new Date(savedTimestamp);
+    }
     
     // Show connected status
     showSyncStatus('synced');
     
+    // TO-DO
     // Perform initial pull from cloud on startup
-    performInitialPull();
+    // performInitialPull();
 }
 
 /**
@@ -70,30 +72,8 @@ function setupSyncButtons() {
     }
 }
 
-/**
- * Start automatic pull from cloud at regular intervals
- */
-function startAutoPull() {
-    stopAutoPull();
-    
-    FirebaseSync.autoPullInterval = setInterval(() => {
-        if (FirebaseSync.isEnabled && !FirebaseSync.syncInProgress) {
-            performPullFromCloud(true); // Silent pull
-        }
-    }, FirebaseSync.AUTO_PULL_INTERVAL_MS);
-    
-    console.log('🔄 Auto-pull started (every 60 seconds)');
-}
-
-/**
- * Stop automatic pull
- */
-function stopAutoPull() {
-    if (FirebaseSync.autoPullInterval) {
-        clearInterval(FirebaseSync.autoPullInterval);
-        FirebaseSync.autoPullInterval = null;
-    }
-}
+// Auto-pull removed to reduce Firebase reads
+// Users should manually pull when needed
 
 // ============================================
 // Firestore Data Operations
@@ -199,7 +179,84 @@ async function syncTransaction(transaction) {
 }
 
 /**
- * Sync ledger entity (customer, supplier, etc.)
+ * Batch sync stock transactions (transaction-only file)
+ */
+async function syncAllStockTransactions(transactions) {
+    const { db, isConfigured } = window.firebaseConfig;
+    
+    if (!isConfigured() || !FirebaseSync.isEnabled || !db) return 0;
+    if (!transactions || transactions.length === 0) return 0;
+    
+    try {
+        const BATCH_SIZE = 500;
+        let totalSynced = 0;
+        
+        for (let i = 0; i < transactions.length; i += BATCH_SIZE) {
+            const batch = db.batch();
+            const chunk = transactions.slice(i, i + BATCH_SIZE);
+            
+            chunk.forEach(transaction => {
+                const docId = `${transaction.timestamp}_${transaction.item_id}_${transaction.factory}`.replace(/[\/\s:]/g, '_');
+                const docRef = db.collection('stock_transactions').doc(docId);
+                batch.set(docRef, {
+                    ...transaction,
+                    syncedAt: firebase.firestore.FieldValue.serverTimestamp()
+                }, { merge: true });
+            });
+            
+            await batch.commit();
+            totalSynced += chunk.length;
+        }
+        
+        console.log(`✅ Batch synced ${totalSynced} stock transactions to Firebase`);
+        return totalSynced;
+    } catch (error) {
+        console.error('Failed to batch sync stock transactions:', error);
+        return 0;
+    }
+}
+
+/**
+ * Batch sync ledger transactions (per-module transaction files)
+ */
+async function syncAllLedgerTransactions(transactions) {
+    const { db, isConfigured } = window.firebaseConfig;
+    
+    if (!isConfigured() || !FirebaseSync.isEnabled || !db) return 0;
+    if (!transactions || transactions.length === 0) return 0;
+    
+    try {
+        const BATCH_SIZE = 500;
+        let totalSynced = 0;
+        
+        for (let i = 0; i < transactions.length; i += BATCH_SIZE) {
+            const batch = db.batch();
+            const chunk = transactions.slice(i, i + BATCH_SIZE);
+            
+            chunk.forEach(transaction => {
+                const ledgerType = transaction.ledger_type || 'unknown';
+                const docId = `${transaction.timestamp}_${transaction.entity_id}`.replace(/[\/\s:]/g, '_');
+                const docRef = db.collection(`${ledgerType}_transactions`).doc(docId);
+                batch.set(docRef, {
+                    ...transaction,
+                    syncedAt: firebase.firestore.FieldValue.serverTimestamp()
+                }, { merge: true });
+            });
+            
+            await batch.commit();
+            totalSynced += chunk.length;
+        }
+        
+        console.log(`✅ Batch synced ${totalSynced} ledger transactions to Firebase`);
+        return totalSynced;
+    } catch (error) {
+        console.error('Failed to batch sync ledger transactions:', error);
+        return 0;
+    }
+}
+
+/**
+ * Sync ledger entity (customer, supplier, etc.) - single item
  */
 async function syncLedgerEntity(ledgerType, entity) {
     const { db, isConfigured } = window.firebaseConfig;
@@ -222,6 +279,46 @@ async function syncLedgerEntity(ledgerType, entity) {
         console.log(`✅ Synced ${ledgerType} entity ${entityId} to Firebase`);
     } catch (error) {
         console.error(`Failed to sync ${ledgerType} entity:`, error);
+    }
+}
+
+/**
+ * Batch sync multiple ledger entities (customers, suppliers, treasury)
+ * Much more efficient than individual writes
+ */
+async function syncAllLedgerEntities(ledgerType, entities) {
+    const { db, isConfigured } = window.firebaseConfig;
+    
+    if (!isConfigured() || !FirebaseSync.isEnabled || !db) return 0;
+    if (!entities || entities.length === 0) return 0;
+    
+    try {
+        // Firestore batch limit is 500 operations
+        const BATCH_SIZE = 500;
+        let totalSynced = 0;
+        
+        for (let i = 0; i < entities.length; i += BATCH_SIZE) {
+            const batch = db.batch();
+            const chunk = entities.slice(i, i + BATCH_SIZE);
+            
+            chunk.forEach(entity => {
+                const entityId = entity.id || entity.account_number;
+                const docRef = db.collection('ledgers').doc(ledgerType).collection('entries').doc(entityId);
+                batch.set(docRef, {
+                    ...entity,
+                    lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
+                }, { merge: true });
+            });
+            
+            await batch.commit();
+            totalSynced += chunk.length;
+        }
+        
+        console.log(`✅ Batch synced ${totalSynced} ${ledgerType} to Firebase`);
+        return totalSynced;
+    } catch (error) {
+        console.error(`Failed to batch sync ${ledgerType}:`, error);
+        return 0;
     }
 }
 
@@ -249,79 +346,11 @@ async function syncTreasuryConfig(config) {
 }
 
 // ============================================
-// Real-time Listeners
+// Real-time Listeners (DISABLED FOR EFFICIENCY)
 // ============================================
-
-/**
- * Start listening for real-time updates from Firestore
- */
-function startRealtimeListeners() {
-    const { db, isConfigured } = window.firebaseConfig;
-    
-    if (!isConfigured() || !FirebaseSync.isEnabled || !db) return;
-    
-    stopRealtimeListeners();
-    
-    const factories = ['bahbit', 'old_factory', 'station', 'thaabaneya'];
-    
-    factories.forEach(factory => {
-        const unsubscribe = db
-            .collection('stock')
-            .doc(factory)
-            .collection('items')
-            .onSnapshot((snapshot) => {
-                snapshot.docChanges().forEach((change) => {
-                    if (change.doc.metadata.hasPendingWrites) return;
-                    
-                    const item = { id: change.doc.id, ...change.doc.data() };
-                    
-                    if (change.type === 'added' || change.type === 'modified') {
-                        handleRemoteStockUpdate(factory, item);
-                    } else if (change.type === 'removed') {
-                        handleRemoteStockDelete(factory, item.id);
-                    }
-                });
-            }, (error) => {
-                console.error(`Error listening to ${factory} stock:`, error);
-            });
-        
-        FirebaseSync.listeners.push(unsubscribe);
-    });
-    
-    console.log('✅ Real-time listeners started');
-}
-
-/**
- * Stop all real-time listeners
- */
-function stopRealtimeListeners() {
-    FirebaseSync.listeners.forEach(unsubscribe => {
-        if (typeof unsubscribe === 'function') unsubscribe();
-    });
-    FirebaseSync.listeners = [];
-}
-
-/**
- * Handle remote stock update
- */
-function handleRemoteStockUpdate(factory, item) {
-    console.log(`📥 Remote update for ${factory}: ${item.id}`);
-    
-    if (typeof getCurrentFactory === 'function' && getCurrentFactory() === factory) {
-        if (typeof loadStockData === 'function') loadStockData();
-    }
-}
-
-/**
- * Handle remote stock deletion
- */
-function handleRemoteStockDelete(factory, itemId) {
-    console.log(`📥 Remote delete for ${factory}: ${itemId}`);
-    
-    if (typeof getCurrentFactory === 'function' && getCurrentFactory() === factory) {
-        if (typeof loadStockData === 'function') loadStockData();
-    }
-}
+// Real-time listeners have been removed to reduce Firebase reads.
+// The app now uses manual push/pull which is much more cost-effective.
+// Each onSnapshot listener was reading ALL documents on every page load.
 
 // ============================================
 // PUSH - Upload local data to cloud
@@ -365,6 +394,20 @@ async function executePushToCloud() {
     try {
         const factories = ['bahbit', 'old_factory', 'station', 'thaabaneya'];
         
+        // Calculate total steps for progress tracking
+        let totalSteps = 0;
+        let completedSteps = 0;
+        
+        // Count steps: 4 factories + 5 ledger types + treasury config + 2 transaction types
+        totalSteps = factories.length + 5 + 1 + 2; // 12 steps total
+        
+        const updateProgress = () => {
+            const percentage = (completedSteps / totalSteps) * 100;
+            updateSyncProgress(percentage);
+        };
+        
+        updateProgress();
+        
         // Push stock for each factory
         for (const factory of factories) {
             try {
@@ -373,42 +416,88 @@ async function executePushToCloud() {
                     await syncAllStockItems(factory, items);
                     totalSynced += items.length;
                 }
+                completedSteps++;
+                updateProgress();
             } catch (error) {
                 console.error(`Failed to push ${factory}:`, error);
+                completedSteps++;
+                updateProgress();
             }
         }
         
-        // Push customers
+        // Push customers (batch)
         try {
             const customers = await eel.get_all_customers({})();
-            for (const customer of (customers || [])) {
-                await syncLedgerEntity('customers', customer);
-                totalSynced++;
+            if (customers && customers.length > 0) {
+                const synced = await syncAllLedgerEntities('customers', customers);
+                totalSynced += synced;
             }
+            completedSteps++;
+            updateProgress();
         } catch (error) {
             console.error('Failed to push customers:', error);
+            completedSteps++;
+            updateProgress();
         }
         
-        // Push suppliers
+        // Push suppliers (batch)
         try {
             const suppliers = await eel.get_all_suppliers({})();
-            for (const supplier of (suppliers || [])) {
-                await syncLedgerEntity('suppliers', supplier);
-                totalSynced++;
+            if (suppliers && suppliers.length > 0) {
+                const synced = await syncAllLedgerEntities('suppliers', suppliers);
+                totalSynced += synced;
             }
+            completedSteps++;
+            updateProgress();
         } catch (error) {
             console.error('Failed to push suppliers:', error);
+            completedSteps++;
+            updateProgress();
         }
         
-        // Push treasury
+        // Push treasury (batch)
         try {
             const treasury = await eel.get_all_treasury({})();
-            for (const account of (treasury || [])) {
-                await syncLedgerEntity('treasury', account);
-                totalSynced++;
+            if (treasury && treasury.length > 0) {
+                const synced = await syncAllLedgerEntities('treasury', treasury);
+                totalSynced += synced;
             }
+            completedSteps++;
+            updateProgress();
         } catch (error) {
             console.error('Failed to push treasury:', error);
+            completedSteps++;
+            updateProgress();
+        }
+        
+        // Push covenants (batch)
+        try {
+            const covenants = await eel.get_all_covenants({})();
+            if (covenants && covenants.length > 0) {
+                const synced = await syncAllLedgerEntities('covenants', covenants);
+                totalSynced += synced;
+            }
+            completedSteps++;
+            updateProgress();
+        } catch (error) {
+            console.error('Failed to push covenants:', error);
+            completedSteps++;
+            updateProgress();
+        }
+        
+        // Push advances (batch)
+        try {
+            const advances = await eel.get_all_advances({})();
+            if (advances && advances.length > 0) {
+                const synced = await syncAllLedgerEntities('advances', advances);
+                totalSynced += synced;
+            }
+            completedSteps++;
+            updateProgress();
+        } catch (error) {
+            console.error('Failed to push advances:', error);
+            completedSteps++;
+            updateProgress();
         }
         
         // Push treasury config (initialization settings)
@@ -418,14 +507,55 @@ async function executePushToCloud() {
                 await syncTreasuryConfig(treasuryConfig);
                 console.log('✅ Synced treasury config to Firebase');
             }
+            completedSteps++;
+            updateProgress();
         } catch (error) {
             console.error('Failed to push treasury config:', error);
+            completedSteps++;
+            updateProgress();
         }
         
+        // Push stock transactions (transaction-only file)
+        try {
+            const stockTransactions = await eel.get_all_stock_transactions()();
+            if (stockTransactions && stockTransactions.length > 0) {
+                const synced = await syncAllStockTransactions(stockTransactions);
+                totalSynced += synced;
+                console.log(`✅ Synced ${synced} stock transactions`);
+            }
+            completedSteps++;
+            updateProgress();
+        } catch (error) {
+            console.error('Failed to push stock transactions:', error);
+            completedSteps++;
+            updateProgress();
+        }
+        
+        // Push ledger transactions (transaction-only file)
+        try {
+            const ledgerTransactions = await eel.get_all_ledger_transactions_for_sync()();
+            if (ledgerTransactions && ledgerTransactions.length > 0) {
+                const synced = await syncAllLedgerTransactions(ledgerTransactions);
+                totalSynced += synced;
+                console.log(`✅ Synced ${synced} ledger transactions`);
+            }
+            completedSteps++;
+            updateProgress();
+        } catch (error) {
+            console.error('Failed to push ledger transactions:', error);
+            completedSteps++;
+            updateProgress();
+        }
+        
+        // Complete
+        updateSyncProgress(100);
+        
         FirebaseSync.lastSyncTime = new Date();
+        FirebaseSync.lastSyncTimestamp = new Date();
+        localStorage.setItem('firebase_last_sync_timestamp', FirebaseSync.lastSyncTimestamp.toISOString());
         showSyncStatus('synced');
         
-        console.log(`✅ Push completed: ${totalSynced} items pushed to cloud`);
+        console.log(`✅ Push completed: ${totalSynced} items pushed to cloud (using batch writes)`);
         
         if (typeof showToast === 'function') {
             showToast(lang === 'ar' 
@@ -450,8 +580,10 @@ async function executePushToCloud() {
 
 /**
  * Pull data from cloud to local
+ * @param {boolean} silent - If true, don't show toast notifications
+ * @param {boolean} skipExisting - If true, skip items that already exist locally (non-destructive)
  */
-async function performPullFromCloud(silent = false) {
+async function performPullFromCloud(silent = false, skipExisting = false) {
     const { db, isConfigured } = window.firebaseConfig;
     
     if (!isConfigured() || !FirebaseSync.isEnabled || FirebaseSync.syncInProgress || !db) {
@@ -463,21 +595,39 @@ async function performPullFromCloud(silent = false) {
     showSyncStatus('syncing');
     
     let totalPulled = 0;
+    let totalSkipped = 0;
     const lang = window.i18n?.currentLang() || 'en';
     
     try {
         const factories = ['bahbit', 'old_factory', 'station', 'thaabaneya'];
         
-        // Pull stock for each factory
+        // Calculate total steps for progress tracking
+        // 4 factories + 5 ledger types + treasury config + stock txns + 5 ledger txn types
+        const totalSteps = factories.length + 5 + 1 + 1 + 5; // 16 steps total
+        let completedSteps = 0;
+        
+        const updateProgress = () => {
+            const percentage = (completedSteps / totalSteps) * 100;
+            updateSyncProgress(percentage);
+        };
+        
+        updateProgress();
+        
+        // Pull stock for each factory (with incremental sync if available)
+        const useIncremental = !skipExisting && FirebaseSync.lastSyncTimestamp;
+        
         for (const factory of factories) {
             try {
-                console.log(`📥 Pulling from stock/${factory}/items...`);
+                console.log(`📥 Pulling from stock/${factory}/items...${useIncremental ? ' (incremental)' : ' (full)'}`);
                 
-                const snapshot = await db
-                    .collection('stock')
-                    .doc(factory)
-                    .collection('items')
-                    .get();
+                let query = db.collection('stock').doc(factory).collection('items');
+                
+                // Only fetch items modified since last sync (reduces reads significantly)
+                if (useIncremental) {
+                    query = query.where('lastUpdated', '>', FirebaseSync.lastSyncTimestamp);
+                }
+                
+                const snapshot = await query.get();
                 
                 console.log(`📦 ${factory}: Found ${snapshot.size} items in cloud`);
                 
@@ -489,79 +639,187 @@ async function performPullFromCloud(silent = false) {
                         console.log(`  - Importing: ${item.id} (${item.name})`);
                         
                         try {
-                            const result = await eel.import_item_from_cloud(factory, item)();
+                            const result = await eel.import_item_from_cloud(factory, item, skipExisting)();
                             console.log(`  - Result:`, result);
                             if (result && result.success) {
-                                totalPulled++;
+                                if (result.skipped) {
+                                    totalSkipped++;
+                                } else {
+                                    totalPulled++;
+                                }
                             }
                         } catch (err) {
                             console.error(`Failed to import item ${item.id}:`, err);
                         }
                     }
                 }
+                completedSteps++;
+                updateProgress();
             } catch (error) {
                 console.error(`Failed to pull ${factory}:`, error);
+                completedSteps++;
+                updateProgress();
             }
         }
         
-        // Pull customers
+        // Pull customers (with incremental sync if available)
         try {
-            const snapshot = await db
-                .collection('ledgers')
-                .doc('customers')
-                .collection('entries')
-                .get();
+            let query = db.collection('ledgers').doc('customers').collection('entries');
+            
+            if (useIncremental) {
+                query = query.where('lastUpdated', '>', FirebaseSync.lastSyncTimestamp);
+            }
+            
+            const snapshot = await query.get();
             
             if (!snapshot.empty) {
                 for (const doc of snapshot.docs) {
                     const customer = { id: doc.id, ...doc.data() };
                     delete customer.lastUpdated;
-                    await eel.import_customer_from_cloud(customer)();
-                    totalPulled++;
+                    const result = await eel.import_customer_from_cloud(customer, skipExisting)();
+                    if (result && result.success) {
+                        if (result.skipped) {
+                            totalSkipped++;
+                        } else {
+                            totalPulled++;
+                        }
+                    }
                 }
             }
+            completedSteps++;
+            updateProgress();
         } catch (error) {
             console.error('Failed to pull customers:', error);
+            completedSteps++;
+            updateProgress();
         }
         
-        // Pull suppliers
+        // Pull suppliers (with incremental sync if available)
         try {
-            const snapshot = await db
-                .collection('ledgers')
-                .doc('suppliers')
-                .collection('entries')
-                .get();
+            let query = db.collection('ledgers').doc('suppliers').collection('entries');
+            
+            if (useIncremental) {
+                query = query.where('lastUpdated', '>', FirebaseSync.lastSyncTimestamp);
+            }
+            
+            const snapshot = await query.get();
             
             if (!snapshot.empty) {
                 for (const doc of snapshot.docs) {
                     const supplier = { id: doc.id, ...doc.data() };
                     delete supplier.lastUpdated;
-                    await eel.import_supplier_from_cloud(supplier)();
-                    totalPulled++;
+                    const result = await eel.import_supplier_from_cloud(supplier, skipExisting)();
+                    if (result && result.success) {
+                        if (result.skipped) {
+                            totalSkipped++;
+                        } else {
+                            totalPulled++;
+                        }
+                    }
                 }
             }
+            completedSteps++;
+            updateProgress();
         } catch (error) {
             console.error('Failed to pull suppliers:', error);
+            completedSteps++;
+            updateProgress();
         }
         
-        // Pull treasury
+        // Pull treasury (with incremental sync if available)
         try {
-            const snapshot = await db
-                .collection('ledgers')
-                .doc('treasury')
-                .collection('entries')
-                .get();
+            let query = db.collection('ledgers').doc('treasury').collection('entries');
+            
+            if (useIncremental) {
+                query = query.where('lastUpdated', '>', FirebaseSync.lastSyncTimestamp);
+            }
+            
+            const snapshot = await query.get();
             
             if (!snapshot.empty) {
                 for (const doc of snapshot.docs) {
                     const account = { account_number: doc.id, ...doc.data() };
                     delete account.lastUpdated;
-                    await eel.import_treasury_from_cloud(account)();
-                    totalPulled++;
+                    const result = await eel.import_treasury_from_cloud(account, skipExisting)();
+                    if (result && result.success) {
+                        if (result.skipped) {
+                            totalSkipped++;
+                        } else {
+                            totalPulled++;
+                        }
+                    }
                 }
             }
+            completedSteps++;
+            updateProgress();
         } catch (error) {
             console.error('Failed to pull treasury:', error);
+            completedSteps++;
+            updateProgress();
+        }
+        
+        // Pull covenants (with incremental sync if available)
+        try {
+            let query = db.collection('ledgers').doc('covenants').collection('entries');
+            
+            if (useIncremental) {
+                query = query.where('lastUpdated', '>', FirebaseSync.lastSyncTimestamp);
+            }
+            
+            const snapshot = await query.get();
+            
+            if (!snapshot.empty) {
+                for (const doc of snapshot.docs) {
+                    const covenant = { id: doc.id, ...doc.data() };
+                    delete covenant.lastUpdated;
+                    const result = await eel.import_covenant_from_cloud(covenant, skipExisting)();
+                    if (result && result.success) {
+                        if (result.skipped) {
+                            totalSkipped++;
+                        } else {
+                            totalPulled++;
+                        }
+                    }
+                }
+            }
+            completedSteps++;
+            updateProgress();
+        } catch (error) {
+            console.error('Failed to pull covenants:', error);
+            completedSteps++;
+            updateProgress();
+        }
+        
+        // Pull advances (with incremental sync if available)
+        try {
+            let query = db.collection('ledgers').doc('advances').collection('entries');
+            
+            if (useIncremental) {
+                query = query.where('lastUpdated', '>', FirebaseSync.lastSyncTimestamp);
+            }
+            
+            const snapshot = await query.get();
+            
+            if (!snapshot.empty) {
+                for (const doc of snapshot.docs) {
+                    const advance = { id: doc.id, ...doc.data() };
+                    delete advance.lastUpdated;
+                    const result = await eel.import_advance_from_cloud(advance, skipExisting)();
+                    if (result && result.success) {
+                        if (result.skipped) {
+                            totalSkipped++;
+                        } else {
+                            totalPulled++;
+                        }
+                    }
+                }
+            }
+            completedSteps++;
+            updateProgress();
+        } catch (error) {
+            console.error('Failed to pull advances:', error);
+            completedSteps++;
+            updateProgress();
         }
         
         // Pull treasury config (initialization settings)
@@ -574,23 +832,103 @@ async function performPullFromCloud(silent = false) {
             if (configDoc.exists) {
                 const config = configDoc.data();
                 delete config.lastUpdated;
-                await eel.import_treasury_config_from_cloud(config)();
-                console.log('✅ Pulled treasury config from Firebase');
+                const result = await eel.import_treasury_config_from_cloud(config, skipExisting)();
+                if (result && result.success && !result.skipped) {
+                    console.log('✅ Pulled treasury config from Firebase');
+                } else if (result && result.skipped) {
+                    console.log('⏭️ Skipped treasury config (already exists locally)');
+                }
             }
+            completedSteps++;
+            updateProgress();
         } catch (error) {
             console.error('Failed to pull treasury config:', error);
+            completedSteps++;
+            updateProgress();
         }
         
+        // Pull stock transactions
+        try {
+            console.log('📥 Pulling stock transactions from cloud...');
+            const snapshot = await db.collection('stock_transactions').get();
+            console.log(`📦 Found ${snapshot.size} stock transactions in cloud`);
+            
+            if (!snapshot.empty) {
+                const transactions = [];
+                snapshot.forEach(doc => {
+                    const data = doc.data();
+                    delete data.syncedAt;
+                    transactions.push(data);
+                });
+                
+                const result = await eel.import_stock_transactions_from_cloud(transactions, skipExisting)();
+                if (result && result.success) {
+                    totalPulled += result.imported || 0;
+                    totalSkipped += result.skipped || 0;
+                    console.log(`✅ Imported ${result.imported} stock transactions, skipped ${result.skipped}`);
+                }
+            }
+            completedSteps++;
+            updateProgress();
+        } catch (error) {
+            console.error('Failed to pull stock transactions:', error);
+            completedSteps++;
+            updateProgress();
+        }
+        
+        // Pull ledger transactions (per-module: customer, supplier, treasury, covenant, advance)
+        const ledgerTypes = ['customer', 'supplier', 'treasury', 'covenant', 'advance'];
+        for (const ledgerType of ledgerTypes) {
+            try {
+                console.log(`📥 Pulling ${ledgerType} transactions from cloud...`);
+                const snapshot = await db.collection(`${ledgerType}_transactions`).get();
+                console.log(`📦 Found ${snapshot.size} ${ledgerType} transactions in cloud`);
+                
+                if (!snapshot.empty) {
+                    const transactions = [];
+                    snapshot.forEach(doc => {
+                        const data = doc.data();
+                        delete data.syncedAt;
+                        delete data.ledger_type; // Remove sync metadata, backend knows from ledgerType param
+                        transactions.push(data);
+                    });
+                    
+                    const result = await eel.import_ledger_transactions_from_cloud(ledgerType, transactions, skipExisting)();
+                    if (result && result.success) {
+                        totalPulled += result.imported || 0;
+                        totalSkipped += result.skipped || 0;
+                        console.log(`✅ Imported ${result.imported} ${ledgerType} transactions, skipped ${result.skipped}`);
+                    }
+                }
+                completedSteps++;
+                updateProgress();
+            } catch (error) {
+                console.error(`Failed to pull ${ledgerType} transactions:`, error);
+                completedSteps++;
+                updateProgress();
+            }
+        }
+        
+        // Complete
+        updateSyncProgress(100);
+        
         FirebaseSync.lastPullTime = new Date();
+        FirebaseSync.lastSyncTimestamp = new Date();
+        localStorage.setItem('firebase_last_sync_timestamp', FirebaseSync.lastSyncTimestamp.toISOString());
         showSyncStatus('synced');
+        
+        console.log(`✅ Pull completed: ${totalPulled} new, ${totalSkipped} skipped (incremental sync enabled)`);
         
         // Refresh UI if items were pulled
         if (totalPulled > 0) {
             if (typeof loadStockData === 'function') loadStockData();
+            if (typeof loadTransactionData === 'function') loadTransactionData();
             if (typeof loadCustomersData === 'function') loadCustomersData();
             if (typeof loadSuppliersData === 'function') loadSuppliersData();
             if (typeof loadTreasuryData === 'function') loadTreasuryData();
             if (typeof loadTreasurySummary === 'function') loadTreasurySummary();
+            if (typeof loadCovenantsData === 'function') loadCovenantsData();
+            if (typeof loadAdvancesData === 'function') loadAdvancesData();
             
             if (!silent && typeof showToast === 'function') {
                 showToast(lang === 'ar' 
@@ -750,8 +1088,8 @@ async function performInitialPull() {
     // Small delay to ensure app is fully loaded
     await new Promise(resolve => setTimeout(resolve, 1000));
     
-    // Perform silent pull
-    await performPullFromCloud(true);
+    // Perform silent, non-destructive pull (skip existing local data)
+    await performPullFromCloud(true, true);
     
     console.log('✅ Initial pull completed');
 }
@@ -774,23 +1112,66 @@ function showSyncStatus(status) {
             indicator.textContent = '☁️ ✓';
             indicator.className = 'sync-indicator synced';
             indicator.title = lang === 'ar' ? 'متصل بالسحابة' : 'Connected to cloud';
+            hideSyncProgress();
             break;
         case 'syncing':
             indicator.textContent = '☁️ ⟳';
             indicator.className = 'sync-indicator syncing';
             indicator.title = lang === 'ar' ? 'جاري المزامنة...' : 'Syncing...';
+            showSyncProgress();
             break;
         case 'error':
             indicator.textContent = '☁️ ✗';
             indicator.className = 'sync-indicator error';
             indicator.title = lang === 'ar' ? 'خطأ في المزامنة' : 'Sync error';
+            hideSyncProgress();
             break;
         case 'offline':
         default:
             indicator.textContent = '☁️ ✗';
             indicator.className = 'sync-indicator offline';
             indicator.title = lang === 'ar' ? 'غير متصل' : 'Not configured';
+            hideSyncProgress();
             break;
+    }
+}
+
+/**
+ * Show sync progress bar
+ */
+function showSyncProgress() {
+    const container = document.getElementById('sync-progress-container');
+    if (container) {
+        container.classList.remove('hidden');
+        updateSyncProgress(0);
+    }
+}
+
+/**
+ * Hide sync progress bar
+ */
+function hideSyncProgress() {
+    const container = document.getElementById('sync-progress-container');
+    if (container) {
+        container.classList.add('hidden');
+    }
+}
+
+/**
+ * Update sync progress
+ * @param {number} percentage - Progress percentage (0-100)
+ * @param {string} label - Optional label to show instead of percentage
+ */
+function updateSyncProgress(percentage, label = null) {
+    const fill = document.getElementById('sync-progress-fill');
+    const text = document.getElementById('sync-progress-text');
+    
+    if (fill) {
+        fill.style.width = `${percentage}%`;
+    }
+    
+    if (text) {
+        text.textContent = label || `${Math.round(percentage)}%`;
     }
 }
 

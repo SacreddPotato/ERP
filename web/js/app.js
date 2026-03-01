@@ -45,9 +45,29 @@ function formatNumberWithSign(value, showSign = true, decimals = 2) {
         minimumFractionDigits: decimals,
         maximumFractionDigits: decimals
     });
+    
+    // Always put sign on the left since numbers are read LTR even in Arabic
     if (num > 0 && showSign) return '+' + formatted;
     if (num < 0) return '-' + formatted;
     return formatted;
+}
+
+/**
+ * Format a number with + or - for display in tables
+ * @param {number|string} value - The number to format
+ * @param {number} decimals - Number of decimal places (default: 2)
+ * @returns {string} Formatted number with sign always on the left
+ */
+function formatSignedNumber(value, decimals = 2) {
+    const num = parseFloat(value) || 0;
+    const formatted = formatNumber(Math.abs(num), decimals);
+    
+    // Always put sign on the left since numbers are read LTR even in Arabic
+    if (num >= 0) {
+        return '+' + formatted;
+    } else {
+        return '-' + formatted;
+    }
 }
 
 // ============================================
@@ -141,6 +161,11 @@ async function initializeApp() {
         // Initialize Firebase sync (if configured)
         if (window.initFirebaseSync) {
             window.initFirebaseSync();
+        }
+        
+        // Initialize auto-update checker
+        if (window.initAutoUpdate) {
+            window.initAutoUpdate();
         }
         
         // Initialize factory selector
@@ -1296,16 +1321,19 @@ function renderStockTable(items) {
         const editBtn = lang === 'ar' ? 'تعديل' : 'Edit';
         
         return `
-            <tr class="${isBelowMin ? 'row-warning' : ''}">
-                <td><strong>${escapeHtml(item.id)}</strong></td>
+            <tr class="${isBelowMin ? 'row-warning' : ''}" data-item-id="${escapeHtml(item.id)}">
+                <td>
+                    <span class="expand-arrow" onclick="toggleItemHistory('${escapeHtml(item.id)}')" title="${lang === 'ar' ? 'إظهار السجل' : 'Show history'}">▶</span>
+                    <strong>${escapeHtml(item.id)}</strong>
+                </td>
                 <td>${escapeHtml(item.name)}</td>
                 <td>${escapeHtml(categoryDisplay)}</td>
                 <td>${escapeHtml(unitDisplay)}</td>
                 <td>${escapeHtml(fullLocationDisplay)}</td>
                 <td>${escapeHtml(item.supplier || '-')}</td>
                 <td>${formatNumber(item.starting_balance)}</td>
-                <td style="color: #16a34a;">+${formatNumber(item.total_incoming)}</td>
-                <td style="color: #dc2626;">-${formatNumber(item.total_outgoing)}</td>
+                <td style="color: #16a34a;">${formatSignedNumber(item.total_incoming)}</td>
+                <td style="color: #dc2626;">${formatSignedNumber(-item.total_outgoing)}</td>
                 <td class="${stockClass}">${formatNumber(netStock)}</td>
                 <td>${formatNumber(unitPrice)}</td>
                 <td style="font-weight: 600; color: #2563eb;">${formatNumber(totalPrice)}</td>
@@ -1317,8 +1345,448 @@ function renderStockTable(items) {
                     <button class="btn btn-small btn-danger" onclick="deleteItem('${escapeHtml(item.id)}')">${deleteBtn}</button>
                 </td>
             </tr>
+            <tr class="item-history-row hidden" id="history-row-${escapeHtml(item.id)}">
+                <td colspan="15" class="history-cell">
+                    <div class="history-container">
+                        <div class="history-header">
+                            <h4>${lang === 'ar' ? 'سجل المعاملات' : 'Transaction History'}</h4>
+                            <input type="text" class="history-search" placeholder="${lang === 'ar' ? 'بحث...' : 'Search...'}" 
+                                   onkeyup="filterItemHistory('${escapeHtml(item.id)}', this.value)">
+                        </div>
+                        <div class="history-content" id="history-content-${escapeHtml(item.id)}">
+                            <div class="loading">${lang === 'ar' ? 'جاري التحميل...' : 'Loading...'}</div>
+                        </div>
+                    </div>
+                </td>
+            </tr>
         `;
     }).join('');
+}
+
+// ============================================
+// Item Transaction History
+// ============================================
+let loadedHistories = {}; // Cache loaded transaction histories
+
+async function toggleItemHistory(itemId) {
+    const historyRow = document.getElementById(`history-row-${itemId}`);
+    const lang = window.i18n?.currentLang() || 'en';
+    const arrow = document.querySelector(`[onclick="toggleItemHistory('${itemId}')"]`);
+    
+    if (!historyRow) return;
+    
+    // Toggle visibility
+    const isHidden = historyRow.classList.contains('hidden');
+    
+    if (isHidden) {
+        // Show and load if not already loaded
+        historyRow.classList.remove('hidden');
+        if (arrow) arrow.classList.add('expanded');
+        
+        if (!loadedHistories[itemId]) {
+            // Load transaction history
+            try {
+                const transactions = await eel.get_item_transactions(itemId, currentFactory)();
+                loadedHistories[itemId] = transactions;
+                renderItemHistory(itemId, transactions);
+            } catch (error) {
+                console.error('Error loading item history:', error);
+                const contentDiv = document.getElementById(`history-content-${itemId}`);
+                contentDiv.innerHTML = `<div class="error-msg">${lang === 'ar' ? 'فشل في تحميل السجل' : 'Failed to load history'}</div>`;
+            }
+        } else {
+            // Already loaded, just display
+            renderItemHistory(itemId, loadedHistories[itemId]);
+        }
+    } else {
+        // Hide
+        historyRow.classList.add('hidden');
+        if (arrow) arrow.classList.remove('expanded');
+    }
+}
+
+function renderItemHistory(itemId, transactions) {
+    const contentDiv = document.getElementById(`history-content-${itemId}`);
+    const lang = window.i18n?.currentLang() || 'en';
+    
+    if (!contentDiv) return;
+    
+    if (transactions.length === 0) {
+        contentDiv.innerHTML = `<div class="no-history">${lang === 'ar' ? 'لا توجد معاملات' : 'No transactions found'}</div>`;
+        return;
+    }
+    
+    // Transaction type translations
+    const transTypeTranslations = {
+        'INCOMING': lang === 'ar' ? 'وارد' : 'INCOMING',
+        'OUTGOING': lang === 'ar' ? 'صادر' : 'OUTGOING',
+        'INITIAL': lang === 'ar' ? 'افتتاحي' : 'INITIAL',
+        'DELETED': lang === 'ar' ? 'محذوف' : 'DELETED',
+        'وارد': 'وارد',
+        'صادر': 'صادر',
+        'افتتاحي': 'افتتاحي',
+        'محذوف': 'محذوف',
+        'تحويل داخلي': 'تحويل داخلي'
+    };
+    
+    const docTypeTranslations = {
+        'purchase_invoice': lang === 'ar' ? 'فاتورة مشتريات' : 'Purchase Invoice',
+        'sales_invoice': lang === 'ar' ? 'فاتورة مبيعات' : 'Sales Invoice',
+        'raw_materials_order': lang === 'ar' ? 'اذن صرف - خامات' : 'Raw Materials Disbursement',
+        'finished_product_receipt': lang === 'ar' ? 'اذن استلام - منتج تام' : 'Finished Product Receipt'
+    };
+    
+    const html = `
+        <table class="history-table">
+            <thead>
+                <tr>
+                    <th>${lang === 'ar' ? 'التاريخ' : 'Date'}</th>
+                    <th>${lang === 'ar' ? 'النوع' : 'Type'}</th>
+                    <th>${lang === 'ar' ? 'الكمية' : 'Quantity'}</th>
+                    <th>${lang === 'ar' ? 'الرصيد السابق' : 'Previous'}</th>
+                    <th>${lang === 'ar' ? 'الرصيد الجديد' : 'New'}</th>
+                    <th>${lang === 'ar' ? 'المورد' : 'Supplier'}</th>
+                    <th>${lang === 'ar' ? 'نوع المستند' : 'Doc Type'}</th>
+                    <th>${lang === 'ar' ? 'رقم المستند' : 'Doc #'}</th>
+                    <th>${lang === 'ar' ? 'ملاحظات' : 'Notes'}</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${transactions.map(trans => {
+                    const transType = transTypeTranslations[trans.transaction_type] || trans.transaction_type;
+                    const docType = docTypeTranslations[trans.document_type] || trans.document_type || '-';
+                    const badgeClass = `badge-${trans.transaction_type.toLowerCase()}`;
+                    
+                    return `
+                        <tr>
+                            <td>${escapeHtml(trans.timestamp || trans.transaction_date || '-')}</td>
+                            <td><span class="badge ${badgeClass}">${escapeHtml(transType)}</span></td>
+                            <td>${formatNumberWithSign(trans.quantity, true)}</td>
+                            <td>${formatNumber(trans.previous_stock)}</td>
+                            <td>${formatNumber(trans.new_stock)}</td>
+                            <td>${escapeHtml(trans.supplier || '-')}</td>
+                            <td>${escapeHtml(docType)}</td>
+                            <td>${escapeHtml(trans.document_number || '-')}</td>
+                            <td>${escapeHtml(trans.notes || '-')}</td>
+                        </tr>
+                    `;
+                }).join('')}
+            </tbody>
+        </table>
+    `;
+    
+    contentDiv.innerHTML = html;
+}
+
+function filterItemHistory(itemId, searchTerm) {
+    const contentDiv = document.getElementById(`history-content-${itemId}`);
+    if (!contentDiv || !loadedHistories[itemId]) return;
+    
+    const searchLower = searchTerm.toLowerCase().trim();
+    
+    if (!searchLower) {
+        // Show all
+        renderItemHistory(itemId, loadedHistories[itemId]);
+        return;
+    }
+    
+    // Filter transactions
+    const filtered = loadedHistories[itemId].filter(trans => {
+        const searchableText = [
+            trans.timestamp,
+            trans.transaction_date,
+            trans.transaction_type,
+            trans.supplier,
+            trans.document_type,
+            trans.document_number,
+            trans.notes
+        ].join(' ').toLowerCase();
+        
+        return searchableText.includes(searchLower);
+    });
+    
+    renderItemHistory(itemId, filtered);
+}
+
+// ============================================
+// Entity Transaction History (for Ledgers)
+// ============================================
+let loadedEntityHistories = {}; // Cache loaded entity transaction histories
+
+async function toggleEntityHistory(entityId, ledgerType) {
+    const historyRow = document.getElementById(`history-row-${entityId}`);
+    const lang = window.i18n?.currentLang() || 'en';
+    const arrow = document.querySelector(`[onclick*="toggleEntityHistory('${entityId}'"]`);
+
+    if (!historyRow) return;
+
+    // Toggle visibility
+    const isHidden = historyRow.classList.contains('hidden');
+
+    if (isHidden) {
+        // Show and load if not already loaded
+        historyRow.classList.remove('hidden');
+        if (arrow) arrow.classList.add('expanded');
+
+        const cacheKey = `${ledgerType}-${entityId}`;
+        if (!loadedEntityHistories[cacheKey]) {
+            // Load transaction history
+            try {
+                const transactions = await eel.get_entity_transactions(entityId, ledgerType)();
+                loadedEntityHistories[cacheKey] = transactions;
+                renderEntityHistory(entityId, transactions);
+            } catch (error) {
+                console.error('Error loading entity history:', error);
+                const contentDiv = document.getElementById(`history-content-${entityId}`);
+                contentDiv.innerHTML = `<div class="error-msg">${lang === 'ar' ? 'فشل في تحميل السجل' : 'Failed to load history'}</div>`;
+            }
+        } else {
+            // Already loaded, just display
+            renderEntityHistory(entityId, loadedEntityHistories[cacheKey]);
+        }
+
+        // Pre-fill history search when this row was matched via transaction search
+        const entityRow = historyRow.previousElementSibling;
+        if (entityRow && entityRow.classList.contains('transaction-match-row')) {
+            const moduleSearchIds = {
+                customer: 'customers-search',
+                supplier: 'suppliers-search',
+                treasury: 'treasury-search',
+                covenant: 'covenants-search',
+                advance: 'advances-search'
+            };
+            const moduleSearchId = moduleSearchIds[ledgerType];
+            const moduleTerm = moduleSearchId
+                ? (document.getElementById(moduleSearchId)?.value || '').trim()
+                : '';
+            if (moduleTerm) {
+                const historySearchInput = historyRow.querySelector('.history-search');
+                if (historySearchInput && !historySearchInput.value) {
+                    historySearchInput.value = moduleTerm;
+                    filterEntityHistory(entityId, moduleTerm);
+                }
+            }
+        }
+    } else {
+        // Hide
+        historyRow.classList.add('hidden');
+        if (arrow) arrow.classList.remove('expanded');
+    }
+}
+
+function renderEntityHistory(entityId, transactions) {
+    const contentDiv = document.getElementById(`history-content-${entityId}`);
+    const lang = window.i18n?.currentLang() || 'en';
+    
+    if (!contentDiv) return;
+    
+    if (transactions.length === 0) {
+        contentDiv.innerHTML = `<div class="no-history">${lang === 'ar' ? 'لا توجد معاملات' : 'No transactions found'}</div>`;
+        return;
+    }
+    
+    // Payment method translations
+    const paymentTranslations = {
+        'cash': lang === 'ar' ? 'نقداً' : 'Cash',
+        'bank_transfer': lang === 'ar' ? 'تحويل بنكي' : 'Bank Transfer',
+        'digital_wallet': lang === 'ar' ? 'محفظة إلكترونية' : 'Digital Wallet',
+        'check': lang === 'ar' ? 'شيك' : 'Check'
+    };
+    
+    const html = `
+        <table class="history-table">
+            <thead>
+                <tr>
+                    <th>${lang === 'ar' ? 'وقت التسجيل' : 'Logged At'}</th>
+                    <th>${lang === 'ar' ? 'تاريخ العملية' : 'Trans. Date'}</th>
+                    <th>${lang === 'ar' ? 'النوع' : 'Type'}</th>
+                    <th>${lang === 'ar' ? 'مدين' : 'Debit'}</th>
+                    <th>${lang === 'ar' ? 'دائن' : 'Credit'}</th>
+                    <th>${lang === 'ar' ? 'الرصيد السابق' : 'Previous'}</th>
+                    <th>${lang === 'ar' ? 'الرصيد الجديد' : 'New'}</th>
+                    <th>${lang === 'ar' ? 'طريقة الدفع' : 'Payment'}</th>
+                    <th>${lang === 'ar' ? 'رقم المستند' : 'Doc #'}</th>
+                    <th>${lang === 'ar' ? 'البيان' : 'Statement'}</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${transactions.map(trans => {
+                    const paymentDisplay = paymentTranslations[trans.payment_method] || trans.payment_method || '-';
+                    const debit = parseFloat(trans.debit || 0);
+                    const credit = parseFloat(trans.credit || 0);
+                    
+                    return `
+                        <tr>
+                            <td>${escapeHtml(trans.timestamp || '-')}</td>
+                            <td>${escapeHtml(trans.transaction_date || '-')}</td>
+                            <td><span class="badge">${escapeHtml(trans.transaction_type || '-')}</span></td>
+                            <td style="color: #16a34a;">${formatSignedNumber(debit)}</td>
+                            <td style="color: #dc2626;">${formatSignedNumber(-credit)}</td>
+                            <td>${formatNumber(trans.previous_balance || 0)}</td>
+                            <td>${formatNumber(trans.new_balance || 0)}</td>
+                            <td>${escapeHtml(paymentDisplay)}</td>
+                            <td>${escapeHtml(trans.document_number || '-')}</td>
+                            <td>${escapeHtml(trans.statement || '-')}</td>
+                        </tr>
+                    `;
+                }).join('')}
+            </tbody>
+        </table>
+    `;
+    
+    contentDiv.innerHTML = html;
+}
+
+function filterEntityHistory(entityId, searchTerm) {
+    const contentDiv = document.getElementById(`history-content-${entityId}`);
+    
+    // Find the cache key that contains this entityId
+    const cacheKey = Object.keys(loadedEntityHistories).find(key => key.endsWith(`-${entityId}`));
+    
+    if (!contentDiv || !cacheKey || !loadedEntityHistories[cacheKey]) return;
+    
+    const searchLower = searchTerm.toLowerCase().trim();
+    
+    if (!searchLower) {
+        // Show all
+        renderEntityHistory(entityId, loadedEntityHistories[cacheKey]);
+        return;
+    }
+    
+    // Filter transactions
+    const filtered = loadedEntityHistories[cacheKey].filter(trans => {
+        const searchableText = [
+            trans.timestamp,
+            trans.transaction_date,
+            trans.transaction_type,
+            trans.payment_method,
+            trans.document_number,
+            trans.statement
+        ].join(' ').toLowerCase();
+        
+        return searchableText.includes(searchLower);
+    });
+    
+    renderEntityHistory(entityId, filtered);
+}
+
+function getModuleEntityId(item, ledgerType) {
+    if (ledgerType === 'treasury') {
+        return (item.account_number || '').toString();
+    }
+    return (item.id || '').toString();
+}
+
+function normalizeEntityId(id) {
+    return (id || '').toString().trim().toUpperCase();
+}
+
+// Only search meaningful text fields — intentionally excluding debit/credit/balance
+// to avoid matching numbers like "37" inside "1,437,000".
+function buildTransactionSearchText(trans) {
+    return [
+        trans.timestamp,
+        trans.transaction_date,
+        trans.entity_id,
+        trans.entity_name,
+        trans.transaction_type,
+        trans.payment_method,
+        trans.document_number,
+        trans.statement
+    ].join(' ').toLowerCase();
+}
+
+/**
+ * Fetch all transactions for a module and return which entities match the search term.
+ * Returns: { matchedIds: Set<normalizedId>, countByEntityId: Map<normalizedId, number> }
+ */
+async function getModuleTransactionMatches(ledgerType, searchTerms, logic = 'OR') {
+    const terms = (Array.isArray(searchTerms) ? searchTerms : [searchTerms])
+        .map(t => (t || '').toString().trim().toLowerCase())
+        .filter(Boolean);
+
+    if (terms.length === 0) {
+        return { matchedIds: new Set(), countByEntityId: new Map() };
+    }
+
+    try {
+        const transactions = await eel.get_module_transactions(ledgerType)();
+        const matchedIds = new Set();
+        const countByEntityId = new Map();
+        const useAnd = (logic || 'OR').toUpperCase() === 'AND';
+
+        for (const trans of transactions) {
+            const searchableText = buildTransactionSearchText(trans);
+            const matches = useAnd
+                ? terms.every(term => searchableText.includes(term))
+                : terms.some(term => searchableText.includes(term));
+
+            if (matches) {
+                const normalizedId = normalizeEntityId(trans.entity_id);
+                matchedIds.add(normalizedId);
+                countByEntityId.set(normalizedId, (countByEntityId.get(normalizedId) || 0) + 1);
+            }
+        }
+
+        return { matchedIds, countByEntityId };
+    } catch (error) {
+        console.error(`Error loading ${ledgerType} transactions for search:`, error);
+        return { matchedIds: new Set(), countByEntityId: new Map() };
+    }
+}
+
+function mergeItemsByEntityId(baseItems, additionalItems, ledgerType) {
+    const merged = [...baseItems];
+    const existing = new Set(baseItems.map(item => normalizeEntityId(getModuleEntityId(item, ledgerType))));
+
+    for (const item of additionalItems) {
+        const normalizedId = normalizeEntityId(getModuleEntityId(item, ledgerType));
+        if (!normalizedId || existing.has(normalizedId)) continue;
+        merged.push(item);
+        existing.add(normalizedId);
+    }
+
+    return merged;
+}
+
+/**
+ * Add a visual "📋 N" pill badge to rows that appeared because of transaction matches,
+ * and a left-border accent to distinguish them from direct entity matches.
+ */
+function markTransactionMatchedRows(ledgerType, transactionMatchedIds, entityMatchedIds, countByEntityId) {
+    if (!transactionMatchedIds || transactionMatchedIds.size === 0) return;
+    const lang = window.i18n?.currentLang() || 'en';
+
+    transactionMatchedIds.forEach(normalizedId => {
+        // Locate the row by data-entity-id (case-insensitive search)
+        const rows = document.querySelectorAll('tr[data-entity-id]');
+        let targetRow = null;
+        for (const r of rows) {
+            if (normalizeEntityId(r.getAttribute('data-entity-id')) === normalizedId) {
+                targetRow = r;
+                break;
+            }
+        }
+        if (!targetRow) return;
+
+        const isEntityMatch = entityMatchedIds && entityMatchedIds.has(normalizedId);
+        const count = countByEntityId ? (countByEntityId.get(normalizedId) || 0) : 0;
+        const label = lang === 'ar' ? `${count} معاملة` : `${count} txn${count !== 1 ? 's' : ''}`;
+        const title = lang === 'ar' ? 'ظهر هذا السجل بسبب تطابق في المعاملات' : 'Appeared due to matching transactions';
+
+        // Add amber left-border accent
+        targetRow.classList.add('transaction-match-row');
+
+        // Add a pill badge in the ID cell (first td), only if not already present
+        const firstCell = targetRow.querySelector('td:first-child');
+        if (firstCell && !firstCell.querySelector('.trans-match-pill')) {
+            const pill = document.createElement('span');
+            pill.className = 'trans-match-pill';
+            pill.title = title;
+            pill.textContent = `📋 ${label}`;
+            firstCell.appendChild(pill);
+        }
+    });
 }
 
 // ============================================
@@ -1425,6 +1893,8 @@ function handleLogSourceChange() {
     document.getElementById('trans-filter-doc-number').value = '';
     document.getElementById('trans-filter-from').value = '';
     document.getElementById('trans-filter-to').value = '';
+    document.getElementById('trans-filter-trans-date-from').value = '';
+    document.getElementById('trans-filter-trans-date-to').value = '';
     transactionFilters = {};
     loadTransactionData();
 }
@@ -1458,7 +1928,9 @@ async function loadTransactionData() {
             // Load ledger transactions
             const filters = {
                 date_from: document.getElementById('trans-filter-from').value,
-                date_to: document.getElementById('trans-filter-to').value
+                date_to: document.getElementById('trans-filter-to').value,
+                trans_date_from: document.getElementById('trans-filter-trans-date-from').value,
+                trans_date_to: document.getElementById('trans-filter-trans-date-to').value
             };
             // Only add ledger_type filter if not 'all_ledger'
             if (currentLogSource !== 'all_ledger') {
@@ -1495,7 +1967,8 @@ function renderTransactionTable(transactions) {
     
     // Restore stock transaction headers (in case ledger view changed them)
     thead.innerHTML = `
-        <th>${lang === 'ar' ? 'التاريخ والوقت' : 'Timestamp'}</th>
+        <th>${lang === 'ar' ? 'وقت التسجيل' : 'Logged At'}</th>
+        <th>${lang === 'ar' ? 'تاريخ العملية' : 'Trans. Date'}</th>
         <th>${lang === 'ar' ? 'كود الصنف' : 'Item ID'}</th>
         <th>${lang === 'ar' ? 'اسم الصنف' : 'Item Name'}</th>
         <th>${lang === 'ar' ? 'النوع' : 'Type'}</th>
@@ -1510,7 +1983,7 @@ function renderTransactionTable(transactions) {
     `;
     
     if (transactions.length === 0) {
-        tbody.innerHTML = `<tr class="empty-row"><td colspan="12">${noTransMsg}</td></tr>`;
+        tbody.innerHTML = `<tr class="empty-row"><td colspan="13">${noTransMsg}</td></tr>`;
         return;
     }
 
@@ -1535,10 +2008,14 @@ function renderTransactionTable(transactions) {
         'تحويل داخلي': 'تحويل داخلي'
     };
 
-    const editBtn = lang === 'ar' ? 'تعديل' : 'Edit';
+    const reverseBtn = lang === 'ar' ? 'عكس' : 'Reverse';
     const deleteBtn = lang === 'ar' ? 'حذف' : 'Delete';
-    // Show most recent first
-    const sortedTransactions = [...transactions].reverse();
+    // Sort by transaction_date (actual date) most recent first, fall back to timestamp
+    const sortedTransactions = [...transactions].sort((a, b) => {
+        const dateA = a.transaction_date || a.timestamp || '';
+        const dateB = b.transaction_date || b.timestamp || '';
+        return dateB.localeCompare(dateA);
+    });
 
     tbody.innerHTML = sortedTransactions.map(trans => {
         let transTypeDisplay = transTypeTranslations[trans.transaction_type] || trans.transaction_type;
@@ -1558,9 +2035,11 @@ function renderTransactionTable(transactions) {
         
         const docTypeDisplay = trans.document_type ? (docTypeTranslations[trans.document_type] || trans.document_type) : '-';
         
-        // Clean up notes - remove factory tracking markers for display
+        // Clean up notes - remove internal markers for display
         let notesDisplay = trans.notes || '-';
         notesDisplay = notesDisplay.replace(/\s*\[FROM:[^\]]+\]/g, '');
+        notesDisplay = notesDisplay.replace(/\s*\[DELETED_ITEM:\{.*\}\]/g, '');  // Hide backup data
+        if (!notesDisplay.trim()) notesDisplay = '-';
         
         // Escape timestamp for use in onclick - replace special characters
         const escapedTimestamp = escapeHtml(trans.timestamp).replace(/'/g, "\\'");
@@ -1569,6 +2048,7 @@ function renderTransactionTable(transactions) {
         return `
             <tr>
                 <td>${escapeHtml(trans.timestamp)}</td>
+                <td>${escapeHtml(trans.transaction_date || '-')}</td>
                 <td><strong>${escapeHtml(trans.item_id)}</strong></td>
                 <td>${escapeHtml(trans.item_name)}</td>
                 <td><span class="badge ${badgeClass}">${escapeHtml(transTypeDisplay)}</span></td>
@@ -1580,7 +2060,7 @@ function renderTransactionTable(transactions) {
                 <td>${escapeHtml(trans.document_number || '-')}</td>
                 <td>${escapeHtml(notesDisplay)}</td>
                 <td>
-                    <button class="btn btn-small btn-secondary" onclick="openEditTransactionDialog('${escapedTimestamp}', '${escapedItemId}')">${editBtn}</button>
+                    <button class="btn btn-small btn-secondary" onclick="confirmReverseTransaction('${escapedTimestamp}', '${escapedItemId}')">${reverseBtn}</button>
                     <button class="btn btn-small btn-danger" onclick="confirmDeleteTransaction('${escapedTimestamp}', '${escapedItemId}')">${deleteBtn}</button>
                 </td>
             </tr>
@@ -1596,7 +2076,8 @@ function renderLedgerTransactionTable(transactions) {
     
     // Update table headers for ledger transactions (with Actions column)
     thead.innerHTML = `
-        <th>${lang === 'ar' ? 'التاريخ والوقت' : 'Timestamp'}</th>
+        <th>${lang === 'ar' ? 'وقت التسجيل' : 'Logged At'}</th>
+        <th>${lang === 'ar' ? 'تاريخ العملية' : 'Trans. Date'}</th>
         <th>${lang === 'ar' ? 'الرقم' : 'ID'}</th>
         <th>${lang === 'ar' ? 'الاسم' : 'Name'}</th>
         <th>${lang === 'ar' ? 'النوع' : 'Type'}</th>
@@ -1611,7 +2092,7 @@ function renderLedgerTransactionTable(transactions) {
     `;
     
     if (transactions.length === 0) {
-        tbody.innerHTML = `<tr class="empty-row"><td colspan="12">${noTransMsg}</td></tr>`;
+        tbody.innerHTML = `<tr class="empty-row"><td colspan="13">${noTransMsg}</td></tr>`;
         return;
     }
 
@@ -1622,16 +2103,25 @@ function renderLedgerTransactionTable(transactions) {
         'check': lang === 'ar' ? 'شيك' : 'Check'
     };
 
-    const editBtn = lang === 'ar' ? 'تعديل' : 'Edit';
+    const reverseBtn = lang === 'ar' ? 'عكس' : 'Reverse';
     const deleteBtn = lang === 'ar' ? 'حذف' : 'Delete';
 
-    // Show most recent first
-    const sortedTransactions = [...transactions].reverse();
+    // Sort by transaction_date (actual date) most recent first, fall back to timestamp
+    const sortedTransactions = [...transactions].sort((a, b) => {
+        const dateA = a.transaction_date || a.timestamp || '';
+        const dateB = b.transaction_date || b.timestamp || '';
+        return dateB.localeCompare(dateA);
+    });
 
     tbody.innerHTML = sortedTransactions.map(trans => {
         const paymentDisplay = paymentTranslations[trans.payment_method] || trans.payment_method || '-';
         const debit = parseFloat(trans.debit || 0);
         const credit = parseFloat(trans.credit || 0);
+        
+        // Statement for display - remove backup data markers
+        let statementDisplay = trans.statement || '-';
+        statementDisplay = statementDisplay.replace(/\s*\[DELETED_ENTITY:\{.*\}\]/g, '');  // Hide backup data
+        if (!statementDisplay.trim()) statementDisplay = '-';
         
         // Escape for onclick
         const escapedTimestamp = escapeHtml(trans.timestamp).replace(/'/g, "\\'");
@@ -1640,18 +2130,19 @@ function renderLedgerTransactionTable(transactions) {
         return `
             <tr>
                 <td>${escapeHtml(trans.timestamp)}</td>
+                <td>${escapeHtml(trans.transaction_date || '-')}</td>
                 <td><strong>${escapeHtml(trans.entity_id)}</strong></td>
                 <td>${escapeHtml(trans.entity_name)}</td>
                 <td><span class="badge">${escapeHtml(trans.transaction_type)}</span></td>
-                <td style="color: #16a34a;">+${formatNumber(debit)}</td>
-                <td style="color: #dc2626;">-${formatNumber(credit)}</td>
+                <td style="color: #16a34a;">${formatSignedNumber(debit)}</td>
+                <td style="color: #dc2626;">${formatSignedNumber(-credit)}</td>
                 <td>${formatNumber(trans.previous_balance || 0)}</td>
                 <td>${formatNumber(trans.new_balance || 0)}</td>
                 <td>${escapeHtml(paymentDisplay)}</td>
                 <td>${escapeHtml(trans.document_number || '-')}</td>
-                <td>${escapeHtml(trans.statement || '-')}</td>
+                <td>${escapeHtml(statementDisplay)}</td>
                 <td>
-                    <button class="btn btn-small btn-secondary" onclick="openEditLedgerTransactionDialog('${escapedTimestamp}', '${escapedEntityId}')">${editBtn}</button>
+                    <button class="btn btn-small btn-secondary" onclick="confirmReverseLedgerTransaction('${escapedTimestamp}', '${escapedEntityId}')">${reverseBtn}</button>
                     <button class="btn btn-small btn-danger" onclick="confirmDeleteLedgerTransaction('${escapedTimestamp}', '${escapedEntityId}')">${deleteBtn}</button>
                 </td>
             </tr>
@@ -1664,7 +2155,8 @@ function restoreStockTransactionHeaders() {
     const lang = window.i18n?.currentLang() || 'en';
     
     thead.innerHTML = `
-        <th data-i18n="th_timestamp">${lang === 'ar' ? 'التاريخ والوقت' : 'Timestamp'}</th>
+        <th>${lang === 'ar' ? 'وقت التسجيل' : 'Logged At'}</th>
+        <th>${lang === 'ar' ? 'تاريخ العملية' : 'Trans. Date'}</th>
         <th data-i18n="th_item_id">${lang === 'ar' ? 'رقم الصنف' : 'Item ID'}</th>
         <th data-i18n="th_item_name">${lang === 'ar' ? 'اسم الصنف' : 'Item Name'}</th>
         <th data-i18n="th_type">${lang === 'ar' ? 'النوع' : 'Type'}</th>
@@ -1675,6 +2167,7 @@ function restoreStockTransactionHeaders() {
         <th data-i18n="th_document_type">${lang === 'ar' ? 'نوع المستند' : 'Document Type'}</th>
         <th data-i18n="th_document_number">${lang === 'ar' ? 'رقم المستند' : 'Document #'}</th>
         <th data-i18n="th_notes">${lang === 'ar' ? 'ملاحظات' : 'Notes'}</th>
+        <th>${lang === 'ar' ? 'إجراءات' : 'Actions'}</th>
     `;
 }
 
@@ -1737,7 +2230,9 @@ function applyTransactionFilters() {
         document_type: document.getElementById('trans-filter-doc-type').value,
         document_number: document.getElementById('trans-filter-doc-number').value.trim(),
         date_from: document.getElementById('trans-filter-from').value,
-        date_to: document.getElementById('trans-filter-to').value
+        date_to: document.getElementById('trans-filter-to').value,
+        trans_date_from: document.getElementById('trans-filter-trans-date-from').value,
+        trans_date_to: document.getElementById('trans-filter-trans-date-to').value
     };
     
     // Remove empty filters
@@ -1755,6 +2250,8 @@ function clearTransactionFilters() {
     document.getElementById('trans-filter-doc-number').value = '';
     document.getElementById('trans-filter-from').value = '';
     document.getElementById('trans-filter-to').value = '';
+    document.getElementById('trans-filter-trans-date-from').value = '';
+    document.getElementById('trans-filter-trans-date-to').value = '';
     // Reset local-only checkbox to checked (default)
     document.getElementById('trans-filter-local-only').checked = true;
     // Clear keyword tags
@@ -1786,7 +2283,8 @@ const stockExportColumns = [
 ];
 
 const transactionExportColumns = [
-    { key: 'timestamp', en: 'Timestamp', ar: 'التاريخ والوقت' },
+    { key: 'timestamp', en: 'Logged At', ar: 'وقت التسجيل' },
+    { key: 'transaction_date', en: 'Transaction Date', ar: 'تاريخ العملية' },
     { key: 'item_id', en: 'Item ID', ar: 'رقم الصنف' },
     { key: 'item_name', en: 'Item Name', ar: 'اسم الصنف' },
     { key: 'transaction_type', en: 'Type', ar: 'النوع' },
@@ -2263,7 +2761,11 @@ async function editItem(itemId) {
                 </div>
                 <div class="form-group">
                     <label>${lang === 'ar' ? 'الرصيد الافتتاحي' : 'Starting Balance'}</label>
-                    <input type="number" id="editItemStartingBalance" value="${parseFloat(item.starting_balance || 0)}" step="0.01">
+                    ${parseFloat(item.starting_balance || 0) === 0 
+                        ? `<input type="number" id="editItemStartingBalance" value="${parseFloat(item.starting_balance || 0)}" step="0.01">`
+                        : `<div class="field-readonly" title="${lang === 'ar' ? 'لا يمكن تعديل الرصيد الافتتاحي إلا إذا كان صفر' : 'Starting balance can only be edited if it is 0'}">${formatNumber(item.starting_balance || 0)} <span class="field-icon">🔒</span></div>
+                           <input type="hidden" id="editItemStartingBalance" value="${parseFloat(item.starting_balance || 0)}">`
+                    }
                 </div>
             </div>
             <div class="dialog-footer">
@@ -2709,6 +3211,136 @@ async function executeDeleteTransaction(timestamp, itemId) {
     } catch (error) {
         console.error('Error deleting transaction:', error);
         const msg = lang === 'ar' ? 'فشل في حذف المعاملة' : 'Failed to delete transaction';
+        showToast(msg, 'error');
+    }
+}
+
+// ============================================
+// Transaction Reversal
+// ============================================
+async function confirmReverseTransaction(timestamp, itemId) {
+    const lang = window.i18n?.currentLang() || 'en';
+    
+    const dialog = createDialog('reverseTransactionDialog', { variant: 'warning' });
+    
+    dialog.innerHTML = `
+        <div class="dialog-header">
+            <h3>${lang === 'ar' ? 'تأكيد العكس' : 'Confirm Reversal'}</h3>
+            <button class="dialog-close" type="button">&times;</button>
+        </div>
+        <div class="dialog-body">
+            <div class="delete-icon">↩️</div>
+            <div class="delete-message">
+                ${lang === 'ar' ? 'هل أنت متأكد من عكس هذه المعاملة؟' : 'Are you sure you want to reverse this transaction?'}
+            </div>
+            <div class="delete-details" style="color: #b45309;">
+                ${lang === 'ar' ? 'سيتم إنشاء معاملة معاكسة لإلغاء المعاملة الأصلية.' : 'This will create an opposite transaction to negate the original.'}
+            </div>
+            <div class="delete-details">
+                <strong>${lang === 'ar' ? 'الصنف:' : 'Item:'}</strong> ${escapeHtml(itemId)}<br>
+                <strong>${lang === 'ar' ? 'الوقت:' : 'Time:'}</strong> ${escapeHtml(timestamp)}
+            </div>
+        </div>
+        <div class="dialog-footer">
+            <button class="btn btn-secondary" type="button" id="cancelReverseTrans">${lang === 'ar' ? 'إلغاء' : 'Cancel'}</button>
+            <button class="btn btn-warning" type="button" id="confirmReverseTrans">${lang === 'ar' ? 'عكس المعاملة' : 'Reverse Transaction'}</button>
+        </div>
+    `;
+    
+    dialog.querySelector('.dialog-close').addEventListener('click', () => dialog.close());
+    dialog.querySelector('#cancelReverseTrans').addEventListener('click', () => dialog.close());
+    dialog.querySelector('#confirmReverseTrans').addEventListener('click', () => executeReverseTransaction(timestamp, itemId));
+    
+    showDialog(dialog);
+}
+
+function closeReverseTransactionModal() {
+    closeDialog('reverseTransactionDialog');
+}
+
+async function executeReverseTransaction(timestamp, itemId) {
+    const lang = window.i18n?.currentLang() || 'en';
+    
+    try {
+        const result = await eel.reverse_transaction(timestamp, itemId, currentFactory)();
+        
+        if (result.success) {
+            const msg = lang === 'ar' ? 'تم عكس المعاملة بنجاح' : 'Transaction reversed successfully';
+            showToast(msg, 'success');
+            closeReverseTransactionModal();
+            await loadTransactionData();
+            // Also refresh stock data in case user goes back to stock view
+            await loadData();
+        } else {
+            showToast(result.message, 'error');
+        }
+    } catch (error) {
+        console.error('Error reversing transaction:', error);
+        const msg = lang === 'ar' ? 'فشل في عكس المعاملة' : 'Failed to reverse transaction';
+        showToast(msg, 'error');
+    }
+}
+
+// ============================================
+// Ledger Transaction Reversal
+// ============================================
+async function confirmReverseLedgerTransaction(timestamp, entityId) {
+    const lang = window.i18n?.currentLang() || 'en';
+    
+    const dialog = createDialog('reverseLedgerTransactionDialog', { variant: 'warning' });
+    
+    dialog.innerHTML = `
+        <div class="dialog-header">
+            <h3>${lang === 'ar' ? 'تأكيد العكس' : 'Confirm Reversal'}</h3>
+            <button class="dialog-close" type="button">&times;</button>
+        </div>
+        <div class="dialog-body">
+            <div class="delete-icon">↩️</div>
+            <div class="delete-message">
+                ${lang === 'ar' ? 'هل أنت متأكد من عكس هذه المعاملة؟' : 'Are you sure you want to reverse this transaction?'}
+            </div>
+            <div class="delete-details" style="color: #b45309;">
+                ${lang === 'ar' ? 'سيتم إنشاء معاملة معاكسة لإلغاء المعاملة الأصلية.' : 'This will create an opposite transaction to negate the original.'}
+            </div>
+            <div class="delete-details">
+                <strong>${lang === 'ar' ? 'الرقم:' : 'ID:'}</strong> ${escapeHtml(entityId)}<br>
+                <strong>${lang === 'ar' ? 'الوقت:' : 'Time:'}</strong> ${escapeHtml(timestamp)}
+            </div>
+        </div>
+        <div class="dialog-footer">
+            <button class="btn btn-secondary" type="button" id="cancelReverseLedgerTrans">${lang === 'ar' ? 'إلغاء' : 'Cancel'}</button>
+            <button class="btn btn-warning" type="button" id="confirmReverseLedgerTrans">${lang === 'ar' ? 'عكس المعاملة' : 'Reverse Transaction'}</button>
+        </div>
+    `;
+    
+    dialog.querySelector('.dialog-close').addEventListener('click', () => dialog.close());
+    dialog.querySelector('#cancelReverseLedgerTrans').addEventListener('click', () => dialog.close());
+    dialog.querySelector('#confirmReverseLedgerTrans').addEventListener('click', () => executeReverseLedgerTransaction(timestamp, entityId));
+    
+    showDialog(dialog);
+}
+
+function closeReverseLedgerTransactionModal() {
+    closeDialog('reverseLedgerTransactionDialog');
+}
+
+async function executeReverseLedgerTransaction(timestamp, entityId) {
+    const lang = window.i18n?.currentLang() || 'en';
+    
+    try {
+        const result = await eel.reverse_ledger_transaction(timestamp, entityId)();
+        
+        if (result.success) {
+            const msg = lang === 'ar' ? 'تم عكس المعاملة بنجاح' : 'Transaction reversed successfully';
+            showToast(msg, 'success');
+            closeReverseLedgerTransactionModal();
+            await loadTransactionData();
+        } else {
+            showToast(result.message, 'error');
+        }
+    } catch (error) {
+        console.error('Error reversing ledger transaction:', error);
+        const msg = lang === 'ar' ? 'فشل في عكس المعاملة' : 'Failed to reverse transaction';
         showToast(msg, 'error');
     }
 }
@@ -3206,7 +3838,9 @@ function showCustomerForm(isExisting, customer = null) {
         document.getElementById('customer-email').value = customer.email || '';
         document.getElementById('customer-email').disabled = true;
         document.getElementById('customer-opening-balance').value = customer.opening_balance || '';
-        document.getElementById('customer-opening-balance').disabled = true;
+        // Opening balance is editable only if it's currently 0
+        const currentOpeningBalance = parseFloat(customer.opening_balance || 0);
+        document.getElementById('customer-opening-balance').disabled = currentOpeningBalance !== 0;
         document.getElementById('customer-debit').value = '';
         document.getElementById('customer-credit').value = '';
     } else {
@@ -3290,11 +3924,29 @@ async function saveCustomer() {
 async function loadCustomersData() {
     try {
         const search = document.getElementById('customers-search')?.value || '';
-        const filters = {};
-        if (search) filters.search = search;
-        
-        const items = await eel.get_all_customers(filters)();
+        const searchLower = search.toLowerCase().trim();
+
+        const allItems = await eel.get_all_customers({})();
+        let items = allItems;
+        let transactionMatchedIds = new Set();
+        let countByEntityId = new Map();
+        const entityMatchedIds = new Set();
+
+        if (searchLower) {
+            const transMatches = await getModuleTransactionMatches('customer', searchLower);
+            transactionMatchedIds = transMatches.matchedIds;
+            countByEntityId = transMatches.countByEntityId;
+
+            items = allItems.filter(item => {
+                const idMatch = (item.id || '').toLowerCase().includes(searchLower);
+                const nameMatch = (item.name || '').toLowerCase().includes(searchLower);
+                if (idMatch || nameMatch) entityMatchedIds.add(normalizeEntityId(item.id));
+                return idMatch || nameMatch || transactionMatchedIds.has(normalizeEntityId(item.id));
+            });
+        }
+
         renderCustomersTable(items);
+        if (searchLower) markTransactionMatchedRows('customer', transactionMatchedIds, entityMatchedIds, countByEntityId);
         const lang = window.i18n?.currentLang() || 'en';
         const itemWord = lang === 'ar' ? 'عميل' : (items.length !== 1 ? 'customers' : 'customer');
         const showingWord = lang === 'ar' ? 'عرض' : 'Showing';
@@ -3348,16 +4000,19 @@ function renderCustomersTable(items) {
         const escapedId = escapeHtml(item.id).replace(/'/g, "\\'");
         
         return `
-            <tr>
-                <td><strong>${escapeHtml(item.id)}</strong></td>
+            <tr data-entity-id="${escapeHtml(item.id)}">
+                <td>
+                    <span class="expand-arrow" onclick="toggleEntityHistory('${escapedId}', 'customer')" title="${lang === 'ar' ? 'إظهار السجل' : 'Show history'}">▶</span>
+                    <strong>${escapeHtml(item.id)}</strong>
+                </td>
                 <td>${escapeHtml(item.name)}</td>
                 <td>${escapeHtml(item.phone || '-')}</td>
                 <td>${escapeHtml(item.email || '-')}</td>
                 <td>${escapeHtml(item.registration_date || '-')}</td>
                 <td>${escapeHtml(item.document_number || '-')}</td>
                 <td>${formatNumber(item.opening_balance || 0)}</td>
-                <td style="color: #16a34a;">+${formatNumber(item.debit || 0)}</td>
-                <td style="color: #dc2626;">-${formatNumber(item.credit || 0)}</td>
+                <td style="color: #16a34a;">${formatSignedNumber(item.debit || 0)}</td>
+                <td style="color: #dc2626;">${formatSignedNumber(-(item.credit || 0))}</td>
                 <td class="${balanceClass}">${formatNumber(balance)}</td>
                 <td>${escapeHtml(paymentDisplay)}</td>
                 <td>${escapeHtml(item.statement || '-')}</td>
@@ -3365,6 +4020,20 @@ function renderCustomersTable(items) {
                     <button class="btn btn-small btn-outline" onclick="selectCustomerForUpdate('${escapedId}')">${updateBtn}</button>
                     <button class="btn btn-small btn-secondary" onclick="editCustomer('${escapedId}')">${editBtn}</button>
                     <button class="btn btn-small btn-danger" onclick="confirmDeleteCustomer('${escapedId}')">${deleteBtn}</button>
+                </td>
+            </tr>
+            <tr class="item-history-row hidden" id="history-row-${escapeHtml(item.id)}">
+                <td colspan="13" class="history-cell">
+                    <div class="history-container">
+                        <div class="history-header">
+                            <h4>${lang === 'ar' ? 'سجل المعاملات' : 'Transaction History'}</h4>
+                            <input type="text" class="history-search" placeholder="${lang === 'ar' ? 'بحث...' : 'Search...'}" 
+                                   onkeyup="filterEntityHistory('${escapeHtml(item.id)}', this.value)">
+                        </div>
+                        <div class="history-content" id="history-content-${escapeHtml(item.id)}">
+                            <div class="loading">${lang === 'ar' ? 'جاري التحميل...' : 'Loading...'}</div>
+                        </div>
+                    </div>
                 </td>
             </tr>
         `;
@@ -3450,7 +4119,9 @@ function showSupplierForm(isExisting, supplier = null) {
         document.getElementById('supplier-email').value = supplier.email || '';
         document.getElementById('supplier-email').disabled = true;
         document.getElementById('supplier-opening-balance').value = supplier.opening_balance || '';
-        document.getElementById('supplier-opening-balance').disabled = true;
+        // Opening balance is editable only if it's currently 0
+        const currentOpeningBalance = parseFloat(supplier.opening_balance || 0);
+        document.getElementById('supplier-opening-balance').disabled = currentOpeningBalance !== 0;
         document.getElementById('supplier-debit').value = '';
         document.getElementById('supplier-credit').value = '';
     } else {
@@ -3534,11 +4205,29 @@ async function saveSupplier() {
 async function loadSuppliersData() {
     try {
         const search = document.getElementById('suppliers-search')?.value || '';
-        const filters = {};
-        if (search) filters.search = search;
-        
-        const items = await eel.get_all_suppliers(filters)();
+        const searchLower = search.toLowerCase().trim();
+
+        const allItems = await eel.get_all_suppliers({})();
+        let items = allItems;
+        let transactionMatchedIds = new Set();
+        let countByEntityId = new Map();
+        const entityMatchedIds = new Set();
+
+        if (searchLower) {
+            const transMatches = await getModuleTransactionMatches('supplier', searchLower);
+            transactionMatchedIds = transMatches.matchedIds;
+            countByEntityId = transMatches.countByEntityId;
+
+            items = allItems.filter(item => {
+                const idMatch = (item.id || '').toLowerCase().includes(searchLower);
+                const nameMatch = (item.name || '').toLowerCase().includes(searchLower);
+                if (idMatch || nameMatch) entityMatchedIds.add(normalizeEntityId(item.id));
+                return idMatch || nameMatch || transactionMatchedIds.has(normalizeEntityId(item.id));
+            });
+        }
+
         renderSuppliersTable(items);
+        if (searchLower) markTransactionMatchedRows('supplier', transactionMatchedIds, entityMatchedIds, countByEntityId);
         const lang = window.i18n?.currentLang() || 'en';
         const itemWord = lang === 'ar' ? 'مورد' : (items.length !== 1 ? 'suppliers' : 'supplier');
         const showingWord = lang === 'ar' ? 'عرض' : 'Showing';
@@ -3592,16 +4281,19 @@ function renderSuppliersTable(items) {
         const escapedId = escapeHtml(item.id).replace(/'/g, "\\'");
         
         return `
-            <tr>
-                <td><strong>${escapeHtml(item.id)}</strong></td>
+            <tr data-entity-id="${escapeHtml(item.id)}">
+                <td>
+                    <span class="expand-arrow" onclick="toggleEntityHistory('${escapedId}', 'supplier')" title="${lang === 'ar' ? 'إظهار السجل' : 'Show history'}">▶</span>
+                    <strong>${escapeHtml(item.id)}</strong>
+                </td>
                 <td>${escapeHtml(item.name)}</td>
                 <td>${escapeHtml(item.phone || '-')}</td>
                 <td>${escapeHtml(item.email || '-')}</td>
                 <td>${escapeHtml(item.registration_date || '-')}</td>
                 <td>${escapeHtml(item.document_number || '-')}</td>
                 <td>${formatNumber(item.opening_balance || 0)}</td>
-                <td style="color: #16a34a;">+${formatNumber(item.debit || 0)}</td>
-                <td style="color: #dc2626;">-${formatNumber(item.credit || 0)}</td>
+                <td style="color: #16a34a;">${formatSignedNumber(item.debit || 0)}</td>
+                <td style="color: #dc2626;">${formatSignedNumber(-(item.credit || 0))}</td>
                 <td class="${balanceClass}">${formatNumber(balance)}</td>
                 <td>${escapeHtml(paymentDisplay)}</td>
                 <td>${escapeHtml(item.statement || '-')}</td>
@@ -3609,6 +4301,20 @@ function renderSuppliersTable(items) {
                     <button class="btn btn-small btn-outline" onclick="selectSupplierForUpdate('${escapedId}')">${updateBtn}</button>
                     <button class="btn btn-small btn-secondary" onclick="editSupplier('${escapedId}')">${editBtn}</button>
                     <button class="btn btn-small btn-danger" onclick="confirmDeleteSupplier('${escapedId}')">${deleteBtn}</button>
+                </td>
+            </tr>
+            <tr class="item-history-row hidden" id="history-row-${escapeHtml(item.id)}">
+                <td colspan="13" class="history-cell">
+                    <div class="history-container">
+                        <div class="history-header">
+                            <h4>${lang === 'ar' ? 'سجل المعاملات' : 'Transaction History'}</h4>
+                            <input type="text" class="history-search" placeholder="${lang === 'ar' ? 'بحث...' : 'Search...'}" 
+                                   onkeyup="filterEntityHistory('${escapeHtml(item.id)}', this.value)">
+                        </div>
+                        <div class="history-content" id="history-content-${escapeHtml(item.id)}">
+                            <div class="loading">${lang === 'ar' ? 'جاري التحميل...' : 'Loading...'}</div>
+                        </div>
+                    </div>
                 </td>
             </tr>
         `;
@@ -3936,8 +4642,33 @@ async function loadTreasuryData() {
             statement: document.getElementById('treasury-filter-statement')?.value || ''
         };
         
-        const items = await eel.get_all_treasury(filters)();
+        let items = await eel.get_all_treasury(filters)();
+
+        const transactionSearchTerms = [
+            filters.account_number,
+            filters.account_name,
+            filters.document_number,
+            filters.statement,
+            ...(filters.keywords || [])
+        ].map(v => (v || '').toString().trim()).filter(Boolean);
+
+        let treasuryTransactionMatchedIds = new Set();
+        let treasuryCountByEntityId = new Map();
+        let treasuryEntityMatchedIds = new Set(items.map(i => normalizeEntityId(i.account_number)));
+
+        if (transactionSearchTerms.length > 0) {
+            const transMatches = await getModuleTransactionMatches('treasury', transactionSearchTerms, filters.keywordLogic || 'AND');
+            treasuryTransactionMatchedIds = transMatches.matchedIds;
+            treasuryCountByEntityId = transMatches.countByEntityId;
+            if (treasuryTransactionMatchedIds.size > 0) {
+                const allTreasuryItems = await eel.get_all_treasury({})();
+                const extraItems = allTreasuryItems.filter(item => treasuryTransactionMatchedIds.has(normalizeEntityId(item.account_number)));
+                items = mergeItemsByEntityId(items, extraItems, 'treasury');
+            }
+        }
+
         renderTreasuryTable(items);
+        if (transactionSearchTerms.length > 0) markTransactionMatchedRows('treasury', treasuryTransactionMatchedIds, treasuryEntityMatchedIds, treasuryCountByEntityId);
         await loadTreasuryTotalBalance();
         const lang = window.i18n?.currentLang() || 'en';
         const itemWord = lang === 'ar' ? 'حساب' : (items.length !== 1 ? 'accounts' : 'account');
@@ -4026,14 +4757,17 @@ function renderTreasuryTable(items) {
         const escapedAccountNumber = escapeHtml(item.account_number || '').replace(/'/g, "\\'");
         
         return `
-            <tr>
-                <td><strong>${escapeHtml(item.account_number || '-')}</strong></td>
+            <tr data-entity-id="${escapeHtml(item.account_number || '')}">
+                <td>
+                    <span class="expand-arrow" onclick="toggleEntityHistory('${escapedAccountNumber}', 'treasury')" title="${lang === 'ar' ? 'إظهار السجل' : 'Show history'}">▶</span>
+                    <strong>${escapeHtml(item.account_number || '-')}</strong>
+                </td>
                 <td>${escapeHtml(item.account_name || '-')}</td>
                 <td>${escapeHtml(item.registration_date || '-')}</td>
                 <td>${escapeHtml(item.document_number || '-')}</td>
                 <td>${formatNumber(item.opening_balance || 0)}</td>
-                <td style="color: #16a34a;">+${formatNumber(item.debit || 0)}</td>
-                <td style="color: #dc2626;">-${formatNumber(item.credit || 0)}</td>
+                <td style="color: #16a34a;">${formatSignedNumber(item.debit || 0)}</td>
+                <td style="color: #dc2626;">${formatSignedNumber(-(item.credit || 0))}</td>
                 <td class="${balanceClass}">${formatNumber(balance)}</td>
                 <td>${escapeHtml(paymentDisplay)}</td>
                 <td>${escapeHtml(item.statement || '-')}</td>
@@ -4041,6 +4775,20 @@ function renderTreasuryTable(items) {
                     <button class="btn btn-small btn-outline" onclick="selectTreasuryForUpdate('${escapedAccountNumber}')">${updateBtn}</button>
                     <button class="btn btn-small btn-secondary" onclick="editTreasury('${escapedAccountNumber}')">${editBtn}</button>
                     <button class="btn btn-small btn-danger" onclick="confirmDeleteTreasury('${escapedAccountNumber}')">${deleteBtn}</button>
+                </td>
+            </tr>
+            <tr class="item-history-row hidden" id="history-row-${escapeHtml(item.account_number || '')}">
+                <td colspan="11" class="history-cell">
+                    <div class="history-container">
+                        <div class="history-header">
+                            <h4>${lang === 'ar' ? 'سجل المعاملات' : 'Transaction History'}</h4>
+                            <input type="text" class="history-search" placeholder="${lang === 'ar' ? 'بحث...' : 'Search...'}" 
+                                   onkeyup="filterEntityHistory('${escapeHtml(item.account_number || '')}', this.value)">
+                        </div>
+                        <div class="history-content" id="history-content-${escapeHtml(item.account_number || '')}">
+                            <div class="loading">${lang === 'ar' ? 'جاري التحميل...' : 'Loading...'}</div>
+                        </div>
+                    </div>
                 </td>
             </tr>
         `;
@@ -4124,7 +4872,9 @@ function showCovenantForm(isExisting, covenant = null) {
         document.getElementById('covenant-phone').value = covenant.phone || '';
         document.getElementById('covenant-phone').disabled = true;
         document.getElementById('covenant-opening-balance').value = covenant.opening_balance || '';
-        document.getElementById('covenant-opening-balance').disabled = true;
+        // Opening balance is editable only if it's currently 0
+        const currentOpeningBalance = parseFloat(covenant.opening_balance || 0);
+        document.getElementById('covenant-opening-balance').disabled = currentOpeningBalance !== 0;
         document.getElementById('covenant-debit').value = '';
         document.getElementById('covenant-credit').value = '';
     } else {
@@ -4204,11 +4954,30 @@ async function saveCovenant() {
 async function loadCovenantsData() {
     try {
         const search = document.getElementById('covenants-search')?.value || '';
-        const filters = {};
-        if (search) filters.search = search;
+        const searchLower = search.toLowerCase().trim();
+
+        const allItems = await eel.get_all_covenants({})();
+        let items = allItems;
+        let transactionMatchedIds = new Set();
+        let countByEntityId = new Map();
+        const entityMatchedIds = new Set();
+
+        if (searchLower) {
+            const transMatches = await getModuleTransactionMatches('covenant', searchLower);
+            transactionMatchedIds = transMatches.matchedIds;
+            countByEntityId = transMatches.countByEntityId;
+
+            items = allItems.filter(item => {
+                const idMatch = (item.id || '').toLowerCase().includes(searchLower);
+                const nameMatch = (item.employee_name || '').toLowerCase().includes(searchLower);
+                if (idMatch || nameMatch) entityMatchedIds.add(normalizeEntityId(item.id));
+                return idMatch || nameMatch || transactionMatchedIds.has(normalizeEntityId(item.id));
+            });
+        }
+
         
-        const items = await eel.get_all_covenants(filters)();
         renderCovenantsTable(items);
+        if (searchLower) markTransactionMatchedRows('covenant', transactionMatchedIds, entityMatchedIds, countByEntityId);
         const lang = window.i18n?.currentLang() || 'en';
         const itemWord = lang === 'ar' ? 'عهدة' : (items.length !== 1 ? 'covenants' : 'covenant');
         const showingWord = lang === 'ar' ? 'عرض' : 'Showing';
@@ -4262,15 +5031,18 @@ function renderCovenantsTable(items) {
         const escapedId = escapeHtml(item.id).replace(/'/g, "\\'");
         
         return `
-            <tr>
-                <td><strong>${escapeHtml(item.id)}</strong></td>
+            <tr data-entity-id="${escapeHtml(item.id)}">
+                <td>
+                    <span class="expand-arrow" onclick="toggleEntityHistory('${escapedId}', 'covenant')" title="${lang === 'ar' ? 'إظهار السجل' : 'Show history'}">▶</span>
+                    <strong>${escapeHtml(item.id)}</strong>
+                </td>
                 <td>${escapeHtml(item.employee_name)}</td>
                 <td>${escapeHtml(item.phone || '-')}</td>
                 <td>${escapeHtml(item.registration_date || '-')}</td>
                 <td>${escapeHtml(item.document_number || '-')}</td>
                 <td>${formatNumber(item.opening_balance || 0)}</td>
-                <td style="color: #16a34a;">+${formatNumber(item.debit || 0)}</td>
-                <td style="color: #dc2626;">-${formatNumber(item.credit || 0)}</td>
+                <td style="color: #16a34a;">${formatSignedNumber(item.debit || 0)}</td>
+                <td style="color: #dc2626;">${formatSignedNumber(-(item.credit || 0))}</td>
                 <td class="${balanceClass}">${formatNumber(balance)}</td>
                 <td>${escapeHtml(paymentDisplay)}</td>
                 <td>${escapeHtml(item.statement || '-')}</td>
@@ -4278,6 +5050,20 @@ function renderCovenantsTable(items) {
                     <button class="btn btn-small btn-outline" onclick="selectCovenantForUpdate('${escapedId}')">${updateBtn}</button>
                     <button class="btn btn-small btn-secondary" onclick="editCovenant('${escapedId}')">${editBtn}</button>
                     <button class="btn btn-small btn-danger" onclick="confirmDeleteCovenant('${escapedId}')">${deleteBtn}</button>
+                </td>
+            </tr>
+            <tr class="item-history-row hidden" id="history-row-${escapeHtml(item.id)}">
+                <td colspan="12" class="history-cell">
+                    <div class="history-container">
+                        <div class="history-header">
+                            <h4>${lang === 'ar' ? 'سجل المعاملات' : 'Transaction History'}</h4>
+                            <input type="text" class="history-search" placeholder="${lang === 'ar' ? 'بحث...' : 'Search...'}" 
+                                   onkeyup="filterEntityHistory('${escapeHtml(item.id)}', this.value)">
+                        </div>
+                        <div class="history-content" id="history-content-${escapeHtml(item.id)}">
+                            <div class="loading">${lang === 'ar' ? 'جاري التحميل...' : 'Loading...'}</div>
+                        </div>
+                    </div>
                 </td>
             </tr>
         `;
@@ -4361,7 +5147,9 @@ function showAdvanceForm(isExisting, advance = null) {
         document.getElementById('advance-phone').value = advance.phone || '';
         document.getElementById('advance-phone').disabled = true;
         document.getElementById('advance-opening-balance').value = advance.opening_balance || '';
-        document.getElementById('advance-opening-balance').disabled = true;
+        // Opening balance is editable only if it's currently 0
+        const currentOpeningBalance = parseFloat(advance.opening_balance || 0);
+        document.getElementById('advance-opening-balance').disabled = currentOpeningBalance !== 0;
         document.getElementById('advance-debit').value = '';
         document.getElementById('advance-credit').value = '';
     } else {
@@ -4441,11 +5229,29 @@ async function saveAdvance() {
 async function loadAdvancesData() {
     try {
         const search = document.getElementById('advances-search')?.value || '';
-        const filters = {};
-        if (search) filters.search = search;
-        
-        const items = await eel.get_all_advances(filters)();
+        const searchLower = search.toLowerCase().trim();
+
+        const allItems = await eel.get_all_advances({})();
+        let items = allItems;
+        let transactionMatchedIds = new Set();
+        let countByEntityId = new Map();
+        const entityMatchedIds = new Set();
+
+        if (searchLower) {
+            const transMatches = await getModuleTransactionMatches('advance', searchLower);
+            transactionMatchedIds = transMatches.matchedIds;
+            countByEntityId = transMatches.countByEntityId;
+
+            items = allItems.filter(item => {
+                const idMatch = (item.id || '').toLowerCase().includes(searchLower);
+                const nameMatch = (item.employee_name || '').toLowerCase().includes(searchLower);
+                if (idMatch || nameMatch) entityMatchedIds.add(normalizeEntityId(item.id));
+                return idMatch || nameMatch || transactionMatchedIds.has(normalizeEntityId(item.id));
+            });
+        }
+
         renderAdvancesTable(items);
+        if (searchLower) markTransactionMatchedRows('advance', transactionMatchedIds, entityMatchedIds, countByEntityId);
         const lang = window.i18n?.currentLang() || 'en';
         const itemWord = lang === 'ar' ? 'سلفة' : (items.length !== 1 ? 'advances' : 'advance');
         const showingWord = lang === 'ar' ? 'عرض' : 'Showing';
@@ -4499,15 +5305,18 @@ function renderAdvancesTable(items) {
         const escapedId = escapeHtml(item.id).replace(/'/g, "\\'");
         
         return `
-            <tr>
-                <td><strong>${escapeHtml(item.id)}</strong></td>
+            <tr data-entity-id="${escapeHtml(item.id)}">
+                <td>
+                    <span class="expand-arrow" onclick="toggleEntityHistory('${escapedId}', 'advance')" title="${lang === 'ar' ? 'إظهار السجل' : 'Show history'}">▶</span>
+                    <strong>${escapeHtml(item.id)}</strong>
+                </td>
                 <td>${escapeHtml(item.employee_name)}</td>
                 <td>${escapeHtml(item.phone || '-')}</td>
                 <td>${escapeHtml(item.registration_date || '-')}</td>
                 <td>${escapeHtml(item.document_number || '-')}</td>
                 <td>${formatNumber(item.opening_balance || 0)}</td>
-                <td style="color: #16a34a;">+${formatNumber(item.debit || 0)}</td>
-                <td style="color: #dc2626;">-${formatNumber(item.credit || 0)}</td>
+                <td style="color: #16a34a;">${formatSignedNumber(item.debit || 0)}</td>
+                <td style="color: #dc2626;">${formatSignedNumber(-(item.credit || 0))}</td>
                 <td class="${balanceClass}">${formatNumber(balance)}</td>
                 <td>${escapeHtml(paymentDisplay)}</td>
                 <td>${escapeHtml(item.statement || '-')}</td>
@@ -4515,6 +5324,20 @@ function renderAdvancesTable(items) {
                     <button class="btn btn-small btn-outline" onclick="selectAdvanceForUpdate('${escapedId}')">${updateBtn}</button>
                     <button class="btn btn-small btn-secondary" onclick="editAdvance('${escapedId}')">${editBtn}</button>
                     <button class="btn btn-small btn-danger" onclick="confirmDeleteAdvance('${escapedId}')">${deleteBtn}</button>
+                </td>
+            </tr>
+            <tr class="item-history-row hidden" id="history-row-${escapeHtml(item.id)}">
+                <td colspan="12" class="history-cell">
+                    <div class="history-container">
+                        <div class="history-header">
+                            <h4>${lang === 'ar' ? 'سجل المعاملات' : 'Transaction History'}</h4>
+                            <input type="text" class="history-search" placeholder="${lang === 'ar' ? 'بحث...' : 'Search...'}" 
+                                   onkeyup="filterEntityHistory('${escapeHtml(item.id)}', this.value)">
+                        </div>
+                        <div class="history-content" id="history-content-${escapeHtml(item.id)}">
+                            <div class="loading">${lang === 'ar' ? 'جاري التحميل...' : 'Loading...'}</div>
+                        </div>
+                    </div>
                 </td>
             </tr>
         `;

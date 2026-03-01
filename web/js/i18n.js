@@ -221,8 +221,10 @@ const translations = {
         placeholder_keyword_search: "Type & press Enter...",
         filter_item_id: "Item ID",
         filter_type: "Type",
-        filter_date_from: "Date From",
-        filter_date_to: "Date To",
+        filter_date_from: "Logged From",
+        filter_date_to: "Logged To",
+        filter_trans_date_from: "Transaction Date From",
+        filter_trans_date_to: "Transaction Date To",
         all_types: "All Types",
         type_initial: "Initial",
         type_incoming_filter: "Incoming",
@@ -231,6 +233,8 @@ const translations = {
         
         // Transaction Table Headers
         th_timestamp: "Timestamp",
+        th_logged_at: "Logged At",
+        th_trans_date: "Trans. Date",
         th_item_id: "Item ID",
         th_item_name: "Item Name",
         th_type: "Type",
@@ -260,6 +264,15 @@ const translations = {
         // Action Buttons
         btn_update: "Update",
         btn_delete: "Delete",
+        btn_reverse: "Reverse",
+        
+        // Reverse Transaction
+        confirm_reverse_title: "Confirm Reversal",
+        confirm_reverse_message: "Are you sure you want to reverse this transaction?",
+        confirm_reverse_warning: "This will create an opposite transaction to negate the original.",
+        reverse_success: "Transaction reversed successfully",
+        reverse_failed: "Failed to reverse transaction",
+        already_reversed: "This transaction has already been reversed",
         
         // Messages
         msg_item_found: "found. You can update its stock below.",
@@ -427,7 +440,25 @@ const translations = {
         th_payment_method: "Payment",
         th_employee_name: "Employee Name",
         th_date: "Date",
-        th_statement: "Statement"
+        th_statement: "Statement",
+
+        // Auto-Update
+        update_badge: "🔔 Update Available",
+        update_title: "🎉 New Update Available",
+        update_new_version_available: "A new version of the app is available!",
+        update_current_version: "Current version",
+        update_new_version: "New version",
+        update_download: "⬇️ Download Update",
+        update_downloading: "⏳ Downloading...",
+        update_later: "Later",
+        update_open_location: "📂 Open Location",
+        update_downloaded: "✅ Downloaded",
+        update_download_failed: "❌ Download failed",
+        update_retry: "🔄 Retry",
+        update_downloading_update: "Downloading update...",
+        update_downloaded_to_downloads: "✅ Update downloaded to Downloads folder",
+        update_checking: "Checking for updates...",
+        update_up_to_date: "✅ App is up to date"
     },
     ar: {
         // App Header
@@ -650,8 +681,10 @@ const translations = {
         placeholder_keyword_search: "اكتب واضغط Enter...",
         filter_item_id: "رقم الصنف",
         filter_type: "النوع",
-        filter_date_from: "من تاريخ",
-        filter_date_to: "إلى تاريخ",
+        filter_date_from: "تاريخ التسجيل من",
+        filter_date_to: "تاريخ التسجيل إلى",
+        filter_trans_date_from: "تاريخ العملية من",
+        filter_trans_date_to: "تاريخ العملية إلى",
         all_types: "جميع الأنواع",
         type_initial: "افتتاحي",
         type_incoming_filter: "وارد",
@@ -660,6 +693,8 @@ const translations = {
         
         // Transaction Table Headers
         th_timestamp: "التاريخ والوقت",
+        th_logged_at: "وقت التسجيل",
+        th_trans_date: "تاريخ العملية",
         th_item_id: "رقم الصنف",
         th_item_name: "اسم الصنف",
         th_type: "النوع",
@@ -689,6 +724,15 @@ const translations = {
         // Action Buttons
         btn_update: "تحديث",
         btn_delete: "حذف",
+        btn_reverse: "عكس",
+        
+        // Reverse Transaction
+        confirm_reverse_title: "تأكيد العكس",
+        confirm_reverse_message: "هل أنت متأكد من عكس هذه المعاملة؟",
+        confirm_reverse_warning: "سيتم إنشاء معاملة معاكسة لإلغاء المعاملة الأصلية.",
+        reverse_success: "تم عكس المعاملة بنجاح",
+        reverse_failed: "فشل في عكس المعاملة",
+        already_reversed: "تم عكس هذه المعاملة بالفعل",
         
         // Messages
         msg_item_found: "تم العثور عليه. يمكنك تحديث مخزونه أدناه.",
@@ -849,7 +893,25 @@ const translations = {
         th_payment_method: "الدفع",
         th_employee_name: "اسم الموظف",
         th_date: "التاريخ",
-        th_statement: "البيان"
+        th_statement: "البيان",
+
+        // Auto-Update
+        update_badge: "🔔 تحديث متاح",
+        update_title: "🎉 تحديث جديد متاح",
+        update_new_version_available: "يتوفر إصدار جديد من التطبيق!",
+        update_current_version: "الإصدار الحالي",
+        update_new_version: "الإصدار الجديد",
+        update_download: "⬇️ تحميل التحديث",
+        update_downloading: "⏳ جاري التحميل...",
+        update_later: "لاحقاً",
+        update_open_location: "📂 فتح الموقع",
+        update_downloaded: "✅ تم التحميل",
+        update_download_failed: "❌ فشل التحميل",
+        update_retry: "🔄 إعادة المحاولة",
+        update_downloading_update: "جاري تحميل التحديث...",
+        update_downloaded_to_downloads: "✅ تم تحميل التحديث إلى مجلد التنزيلات",
+        update_checking: "جاري البحث عن تحديثات...",
+        update_up_to_date: "✅ التطبيق محدّث"
     }
 };
 

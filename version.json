@@ -1,0 +1,11 @@
+{
+    "version": "1.32",
+    "build_date": "2026-02-28",
+    "changelog": [
+        "Fixed Firebase pull: all transaction types now download correctly",
+        "Module search now searches through transaction history",
+        "Transaction-matched rows highlighted with amber border and match count badge",
+        "Fixed false-positive search matches caused by numeric balance fields",
+        "Expanding a transaction-matched row auto-fills the history search"
+    ]
+}

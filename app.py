@@ -55,6 +55,31 @@ STOCK_FILE_LEGACY = os.path.join(DATA_PATH, 'stock_data.csv')
 TRANSACTIONS_FILE = os.path.join(DATA_PATH, 'transactions_log.csv')
 EXPORTS_FOLDER = os.path.join(DATA_PATH, 'exports')
 
+# Transaction-only files (no edits/deletions - just pure operations)
+STOCK_TRANSACTIONS_FILE = os.path.join(DATA_PATH, 'stock_transactions.csv')
+
+# Per-module transaction files (only actual operations: new entries, financial movements)
+CUSTOMER_TRANSACTIONS_FILE = os.path.join(DATA_PATH, 'customer_transactions.csv')
+SUPPLIER_TRANSACTIONS_FILE = os.path.join(DATA_PATH, 'supplier_transactions.csv')
+TREASURY_TRANSACTIONS_FILE = os.path.join(DATA_PATH, 'treasury_transactions.csv')
+COVENANT_TRANSACTIONS_FILE = os.path.join(DATA_PATH, 'covenant_transactions.csv')
+ADVANCE_TRANSACTIONS_FILE = os.path.join(DATA_PATH, 'advance_transactions.csv')
+
+# Map ledger type to its transaction file
+LEDGER_TRANSACTION_FILES = {
+    'customer': os.path.join(DATA_PATH, 'customer_transactions.csv'),
+    'supplier': os.path.join(DATA_PATH, 'supplier_transactions.csv'),
+    'treasury': os.path.join(DATA_PATH, 'treasury_transactions.csv'),
+    'covenant': os.path.join(DATA_PATH, 'covenant_transactions.csv'),
+    'advance': os.path.join(DATA_PATH, 'advance_transactions.csv'),
+}
+
+# Version file
+VERSION_FILE = os.path.join(BASE_PATH, 'version.json')
+
+# Current app version
+APP_VERSION = "1.32"
+
 # New ledger files
 CUSTOMERS_FILE = os.path.join(DATA_PATH, 'customers_ledger.csv')
 SUPPLIERS_FILE = os.path.join(DATA_PATH, 'suppliers_ledger.csv')
@@ -69,7 +94,13 @@ file_lock = Lock()
 
 # CSV column headers
 STOCK_HEADERS = ['id', 'name', 'category', 'unit', 'location', 'supplier', 'starting_balance', 'total_incoming', 'total_outgoing', 'net_stock', 'unit_price', 'min_stock', 'last_updated']
-TRANSACTION_HEADERS = ['timestamp', 'item_id', 'item_name', 'transaction_type', 'quantity', 'previous_stock', 'new_stock', 'supplier', 'price', 'document_type', 'document_number', 'notes']
+TRANSACTION_HEADERS = ['timestamp', 'transaction_date', 'item_id', 'item_name', 'transaction_type', 'quantity', 'previous_stock', 'new_stock', 'supplier', 'price', 'document_type', 'document_number', 'notes']
+
+# Transaction-only headers (pure operations without edits/deletions)
+STOCK_TRANSACTION_HEADERS = ['timestamp', 'transaction_date', 'item_id', 'item_name', 'transaction_type', 'quantity', 'previous_stock', 'new_stock', 'supplier', 'price', 'document_type', 'document_number', 'notes', 'factory']
+
+# Per-module ledger transaction headers (same structure, each module gets its own file)
+LEDGER_TRANSACTION_HEADERS = ['timestamp', 'transaction_date', 'entity_id', 'entity_name', 'transaction_type', 'debit', 'credit', 'previous_balance', 'new_balance', 'payment_method', 'document_number', 'statement']
 
 # Ledger headers for Customers (factories that buy from us)
 CUSTOMER_HEADERS = ['id', 'name', 'phone', 'email', 'registration_date', 'document_number', 'opening_balance', 'debit', 'credit', 'balance', 'payment_method', 'statement']
@@ -90,7 +121,7 @@ COVENANT_HEADERS = ['id', 'employee_name', 'phone', 'registration_date', 'docume
 ADVANCE_HEADERS = ['id', 'employee_name', 'phone', 'registration_date', 'document_number', 'opening_balance', 'debit', 'credit', 'balance', 'payment_method', 'statement']
 
 # Ledger transaction log headers
-LEDGER_LOG_HEADERS = ['timestamp', 'ledger_type', 'entity_id', 'entity_name', 'transaction_type', 'debit', 'credit', 'previous_balance', 'new_balance', 'payment_method', 'document_number', 'statement']
+LEDGER_LOG_HEADERS = ['timestamp', 'transaction_date', 'ledger_type', 'entity_id', 'entity_name', 'transaction_type', 'debit', 'credit', 'previous_balance', 'new_balance', 'payment_method', 'document_number', 'statement']
 
 # Payment methods
 PAYMENT_METHODS = ['cash', 'bank_transfer', 'digital_wallet', 'check']
@@ -159,21 +190,107 @@ def append_csv(filepath, headers, row):
             writer.writerow(row)
 
 
-def log_transaction(item_id, item_name, trans_type, quantity, prev_stock, new_stock, supplier='', price=0, document_type='', document_number='', notes='', custom_date=''):
-    """Log a transaction to the transactions file"""
-    # Use custom date if provided, otherwise use current timestamp
-    if custom_date:
-        # Convert from yyyy-mm-dd to dd/mm/yyyy format and add time
-        try:
-            date_obj = datetime.strptime(custom_date, '%Y-%m-%d')
-            timestamp = date_obj.strftime('%Y-%m-%d') + ' ' + datetime.now().strftime('%H:%M:%S')
-        except:
-            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+def migrate_csv_headers(filepath, expected_headers):
+    """
+    Migrate a CSV file to include new headers while preserving existing data.
+    New columns will be added with empty values for existing rows.
+    
+    Args:
+        filepath: Path to the CSV file
+        expected_headers: List of expected headers (the new schema)
+    
+    Returns:
+        bool: True if migration was performed, False if no migration needed
+    """
+    if not os.path.exists(filepath):
+        return False
+    
+    with file_lock:
+        # Read the current file to get existing headers
+        with open(filepath, 'r', newline='', encoding='utf-8') as f:
+            reader = csv.reader(f)
+            try:
+                current_headers = next(reader)
+            except StopIteration:
+                # Empty file, no migration needed
+                return False
+        
+        # Check if migration is needed
+        missing_headers = [h for h in expected_headers if h not in current_headers]
+        if not missing_headers:
+            return False  # No migration needed
+        
+        print(f"[MIGRATION] Migrating {filepath}")
+        print(f"[MIGRATION] Adding missing columns: {missing_headers}")
+        
+        # Read all existing data
+        with open(filepath, 'r', newline='', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            existing_data = list(reader)
+        
+        # Add missing columns with empty values to each row
+        for row in existing_data:
+            for header in missing_headers:
+                if header not in row:
+                    row[header] = ''
+        
+        # Write back with new headers
+        with open(filepath, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.DictWriter(f, fieldnames=expected_headers)
+            writer.writeheader()
+            writer.writerows(existing_data)
+        
+        print(f"[MIGRATION] Successfully migrated {len(existing_data)} rows")
+        return True
+
+
+def run_migrations():
+    """Run all CSV migrations on startup"""
+    print("[MIGRATION] Checking for CSV schema migrations...")
+    
+    migrations_performed = 0
+    
+    # Migrate transactions file
+    if migrate_csv_headers(TRANSACTIONS_FILE, TRANSACTION_HEADERS):
+        migrations_performed += 1
+    
+    # Migrate stock files for each factory
+    for factory, stock_file in FACTORY_STOCK_FILES.items():
+        if migrate_csv_headers(stock_file, STOCK_HEADERS):
+            migrations_performed += 1
+    
+    # Migrate ledger files
+    if migrate_csv_headers(CUSTOMERS_FILE, CUSTOMER_HEADERS):
+        migrations_performed += 1
+    if migrate_csv_headers(SUPPLIERS_FILE, SUPPLIER_HEADERS):
+        migrations_performed += 1
+    if migrate_csv_headers(TREASURY_FILE, TREASURY_HEADERS):
+        migrations_performed += 1
+    if migrate_csv_headers(COVENANTS_FILE, COVENANT_HEADERS):
+        migrations_performed += 1
+    if migrate_csv_headers(ADVANCES_FILE, ADVANCE_HEADERS):
+        migrations_performed += 1
+    if migrate_csv_headers(LEDGER_LOG_FILE, LEDGER_LOG_HEADERS):
+        migrations_performed += 1
+    
+    if migrations_performed > 0:
+        print(f"[MIGRATION] Completed {migrations_performed} migration(s)")
     else:
-        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        print("[MIGRATION] No migrations needed")
+
+
+def log_transaction(item_id, item_name, trans_type, quantity, prev_stock, new_stock, supplier='', price=0, document_type='', document_number='', notes='', custom_date='', factory=''):
+    """Log a transaction to both the full log and transaction-only file"""
+    # Always record the actual timestamp when the transaction was logged
+    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    
+    # Store the user-specified transaction date separately (if provided)
+    # This is the date the transaction actually occurred (e.g., backdated entries)
+    transaction_date = custom_date if custom_date else ''
     
     transaction = {
         'timestamp': timestamp,
+        'transaction_date': transaction_date,
         'item_id': item_id,
         'item_name': item_name,
         'transaction_type': trans_type,
@@ -186,17 +303,34 @@ def log_transaction(item_id, item_name, trans_type, quantity, prev_stock, new_st
         'document_number': document_number,
         'notes': notes
     }
+    
+    # Log to full transaction log (includes edits/deletions)
     append_csv(TRANSACTIONS_FILE, TRANSACTION_HEADERS, transaction)
+    
+    # Log to transaction-only file (only actual operations: incoming, outgoing, transfers, initial)
+    if trans_type in ['وارد', 'صادر', 'رصيد افتتاحي', 'تحويل داخلي (وارد)', 'تحويل داخلي (صادر)', 'تحويل داخلي (وارد جديد)']:
+        stock_transaction = {
+            **transaction,
+            'factory': factory
+        }
+        append_csv(STOCK_TRANSACTIONS_FILE, STOCK_TRANSACTION_HEADERS, stock_transaction)
 
 
-def log_ledger_transaction(ledger_type, entity_id, entity_name, trans_type, debit, credit, prev_balance, new_balance, payment_method='', document_number='', statement=''):
-    """Log a ledger transaction (customers, suppliers, treasury, covenants, advances)"""
+def log_ledger_transaction(ledger_type, entity_id, entity_name, trans_type, debit, credit, prev_balance, new_balance, payment_method='', document_number='', statement='', transaction_date=''):
+    """Log a ledger transaction to both the full log and the per-module transaction file
+    
+    Args:
+        ledger_type: 'customer', 'supplier', 'treasury', 'covenant', 'advance'
+        transaction_date: The user-specified date for the transaction (optional)
+    """
     try:
         print(f"[LOG] Attempting to log: {ledger_type} - {entity_id} - {entity_name}")
         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         
-        transaction = {
+        # Full log entry (includes ledger_type for the combined log)
+        full_log_entry = {
             'timestamp': timestamp,
+            'transaction_date': transaction_date,
             'ledger_type': ledger_type,
             'entity_id': entity_id,
             'entity_name': entity_name,
@@ -209,7 +343,32 @@ def log_ledger_transaction(ledger_type, entity_id, entity_name, trans_type, debi
             'document_number': document_number,
             'statement': statement
         }
-        append_csv(LEDGER_LOG_FILE, LEDGER_LOG_HEADERS, transaction)
+        
+        # Log to full combined transaction log (includes edits/deletions)
+        append_csv(LEDGER_LOG_FILE, LEDGER_LOG_HEADERS, full_log_entry)
+        
+        # Log to per-module transaction file (only actual operations: new entries & financial movements)
+        if trans_type in ['جديد', 'تحديث'] and (float(debit or 0) != 0 or float(credit or 0) != 0 or trans_type == 'جديد'):
+            module_transaction = {
+                'timestamp': timestamp,
+                'transaction_date': transaction_date,
+                'entity_id': entity_id,
+                'entity_name': entity_name,
+                'transaction_type': trans_type,
+                'debit': debit,
+                'credit': credit,
+                'previous_balance': prev_balance,
+                'new_balance': new_balance,
+                'payment_method': payment_method,
+                'document_number': document_number,
+                'statement': statement
+            }
+            
+            transaction_file = LEDGER_TRANSACTION_FILES.get(ledger_type)
+            if transaction_file:
+                append_csv(transaction_file, LEDGER_TRANSACTION_HEADERS, module_transaction)
+                print(f"[LOG] Logged to {ledger_type}_transactions.csv")
+        
         print(f"[LOG] Successfully logged: {ledger_type} - {entity_id}")
     except Exception as e:
         import traceback
@@ -385,7 +544,8 @@ def add_new_item(item_id, name, category, unit, location, supplier, starting_bal
         document_type='',
         document_number='',
         notes='تم إضافة صنف جديد للمخزون',
-        custom_date=balance_date
+        custom_date=balance_date,
+        factory=factory
     )
     
     return {'success': True, 'message': f'Item "{name}" added successfully with starting balance of {starting_balance} {unit}'}
@@ -481,7 +641,7 @@ def update_stock(item_id, transaction_type, quantity, supplier='', price=0, docu
             
             # Log the transaction (supplier only for incoming)
             trans_supplier = supplier.strip() if transaction_type == 'incoming' else ''
-            log_transaction(item_id, item['name'], trans_label, quantity, prev_stock, new_stock, trans_supplier, price, document_type, document_number, notes, transaction_date)
+            log_transaction(item_id, item['name'], trans_label, quantity, prev_stock, new_stock, trans_supplier, price, document_type, document_number, notes, transaction_date, factory)
             
             updated = True
             break
@@ -530,7 +690,7 @@ def _handle_internal_transfer(item_id, quantity, source_factory, dest_factory, n
             
             # Log export transaction with marker for destination
             export_notes = f'[FROM:{source_factory}|TO:{dest_factory}] {notes}'.strip()
-            log_transaction(item_id, item['name'], 'تحويل داخلي (صادر)', quantity, prev_stock, new_stock, '', 0, '', '', export_notes, transaction_date)
+            log_transaction(item_id, item['name'], 'تحويل داخلي (صادر)', quantity, prev_stock, new_stock, '', 0, '', '', export_notes, transaction_date, source_factory)
             break
     
     write_csv(source_file, STOCK_HEADERS, source_items)
@@ -559,7 +719,7 @@ def _handle_internal_transfer(item_id, quantity, source_factory, dest_factory, n
                 
                 # Log import transaction
                 import_notes = f'[FROM:{source_factory}|TO:{dest_factory}] {notes}'.strip()
-                log_transaction(item_id, item['name'], 'تحويل داخلي (وارد)', quantity, prev_stock, new_stock, '', 0, '', '', import_notes, transaction_date)
+                log_transaction(item_id, item['name'], 'تحويل داخلي (وارد)', quantity, prev_stock, new_stock, '', 0, '', '', import_notes, transaction_date, dest_factory)
                 break
         
         write_csv(dest_file, STOCK_HEADERS, dest_items)
@@ -586,7 +746,7 @@ def _handle_internal_transfer(item_id, quantity, source_factory, dest_factory, n
         
         # Log import transaction for the new item
         import_notes = f'[FROM:{source_factory}|TO:{dest_factory}] تم إنشاء صنف جديد من التحويل - {notes}'.strip()
-        log_transaction(item_id, source_item['name'], 'تحويل داخلي (وارد جديد)', quantity, 0, quantity, '', 0, '', '', import_notes, transaction_date)
+        log_transaction(item_id, source_item['name'], 'تحويل داخلي (وارد جديد)', quantity, 0, quantity, '', 0, '', '', import_notes, transaction_date, dest_factory)
     
     return {'success': True, 'message': f'Successfully transferred {quantity} {source_item["unit"]} from {source_factory} to {dest_factory}'}
 
@@ -737,6 +897,15 @@ def get_all_transactions(filters=None):
             date_to = filters['date_to']
             transactions = [t for t in transactions if (t.get('timestamp', '') or '')[:10] <= date_to]
         
+        # Filter by transaction_date (user-specified date for when the transaction occurred)
+        if filters.get('trans_date_from'):
+            trans_date_from = filters['trans_date_from']
+            transactions = [t for t in transactions if (t.get('transaction_date', '') or '') >= trans_date_from]
+        
+        if filters.get('trans_date_to'):
+            trans_date_to = filters['trans_date_to']
+            transactions = [t for t in transactions if (t.get('transaction_date', '') or '') <= trans_date_to]
+        
         # Keyword search - search across all text fields (AND logic - all keywords must match)
         if filters.get('keywords'):
             keywords = [kw.strip().lower() for kw in filters['keywords'].split(',') if kw.strip()]
@@ -775,6 +944,102 @@ def get_all_transactions(filters=None):
 
 
 @eel.expose
+def get_item_transactions(item_id, factory=None):
+    """Get all transactions for a specific item (from transaction-only file)"""
+    if not item_id:
+        return []
+    
+    item_id_upper = item_id.strip().upper()
+    
+    # Get all transactions for this item from transaction-only file
+    all_transactions = read_csv(STOCK_TRANSACTIONS_FILE, STOCK_TRANSACTION_HEADERS)
+    
+    # Filter transactions for this item
+    item_transactions = [
+        t for t in all_transactions 
+        if (t.get('item_id', '') or '').strip().upper() == item_id_upper
+    ]
+    
+    # Sort by transaction_date (actual date) most recent first, fall back to timestamp if no transaction_date
+    item_transactions.sort(key=lambda x: x.get('transaction_date', '') or x.get('timestamp', ''), reverse=True)
+    
+    return item_transactions
+
+
+@eel.expose
+def get_entity_transactions(entity_id, ledger_type):
+    """Get all transactions for a specific entity (from per-module transaction file)"""
+    if not entity_id or not ledger_type:
+        return []
+    
+    entity_id_upper = entity_id.strip().upper()
+    ledger_type_lower = ledger_type.lower().strip()
+    
+    # Get the correct per-module transaction file
+    transaction_file = LEDGER_TRANSACTION_FILES.get(ledger_type_lower)
+    if not transaction_file:
+        print(f"[WARN] No transaction file for ledger type: {ledger_type}")
+        return []
+    
+    # Read from per-module transaction file
+    all_transactions = read_csv(transaction_file, LEDGER_TRANSACTION_HEADERS)
+    
+    # Filter transactions for this entity
+    entity_transactions = [
+        t for t in all_transactions 
+        if (t.get('entity_id', '') or '').strip().upper() == entity_id_upper
+    ]
+    
+    # Sort by transaction_date (actual date) most recent first, fall back to timestamp if no transaction_date
+    entity_transactions.sort(key=lambda x: x.get('transaction_date', '') or x.get('timestamp', ''), reverse=True)
+    
+    return entity_transactions
+
+
+@eel.expose
+def get_all_stock_transactions():
+    """Get all stock transactions from the transaction-only file (for Firebase sync)"""
+    try:
+        transactions = read_csv(STOCK_TRANSACTIONS_FILE, STOCK_TRANSACTION_HEADERS)
+        return transactions
+    except Exception as e:
+        print(f"[ERROR] Failed to read stock transactions: {e}")
+        return []
+
+
+@eel.expose
+def get_all_ledger_transactions_for_sync():
+    """Get all ledger transactions from all per-module transaction files (for Firebase sync)"""
+    try:
+        all_transactions = []
+        for ledger_type, file_path in LEDGER_TRANSACTION_FILES.items():
+            transactions = read_csv(file_path, LEDGER_TRANSACTION_HEADERS)
+            # Add ledger_type back for sync context
+            for t in transactions:
+                t['ledger_type'] = ledger_type
+            all_transactions.extend(transactions)
+        return all_transactions
+    except Exception as e:
+        print(f"[ERROR] Failed to read ledger transactions: {e}")
+        return []
+
+
+@eel.expose
+def get_module_transactions(ledger_type):
+    """Get all transactions for a specific module (customer, supplier, treasury, covenant, advance)"""
+    try:
+        ledger_type_lower = ledger_type.lower().strip()
+        transaction_file = LEDGER_TRANSACTION_FILES.get(ledger_type_lower)
+        if not transaction_file:
+            return []
+        transactions = read_csv(transaction_file, LEDGER_TRANSACTION_HEADERS)
+        return transactions
+    except Exception as e:
+        print(f"[ERROR] Failed to read {ledger_type} transactions: {e}")
+        return []
+
+
+@eel.expose
 def get_all_ledger_transactions(filters=None):
     """Get all ledger transactions, optionally filtered by ledger type"""
     transactions = read_csv(LEDGER_LOG_FILE, LEDGER_LOG_HEADERS)
@@ -804,6 +1069,15 @@ def get_all_ledger_transactions(filters=None):
         if filters.get('date_to'):
             date_to = filters['date_to']
             transactions = [t for t in transactions if (t.get('timestamp', '') or '')[:10] <= date_to]
+        
+        # Filter by transaction_date (user-specified date for when the transaction occurred)
+        if filters.get('trans_date_from'):
+            trans_date_from = filters['trans_date_from']
+            transactions = [t for t in transactions if (t.get('transaction_date', '') or '') >= trans_date_from]
+        
+        if filters.get('trans_date_to'):
+            trans_date_to = filters['trans_date_to']
+            transactions = [t for t in transactions if (t.get('transaction_date', '') or '') <= trans_date_to]
         
         # Keyword search - search across all text fields (AND or OR logic based on parameter)
         if filters.get('keywords'):
@@ -889,6 +1163,135 @@ def delete_transaction(timestamp, item_id):
 
 
 @eel.expose
+def reverse_transaction(timestamp, item_id, factory=None):
+    """Reverse a stock transaction by undoing its effects and removing it from the log.
+    
+    This restores the state as if the transaction never happened:
+    - Incoming transactions: subtract the quantity from stock
+    - Outgoing transactions: add the quantity back to stock
+    - Deletion transactions: restore the deleted item
+    - The transaction is removed from the transaction log
+    """
+    try:
+        import json
+        transactions = read_csv(TRANSACTIONS_FILE, TRANSACTION_HEADERS)
+        
+        # Find the original transaction
+        original_trans = None
+        original_index = -1
+        for i, trans in enumerate(transactions):
+            if trans.get('timestamp') == timestamp and trans.get('item_id') == item_id:
+                original_trans = trans
+                original_index = i
+                break
+        
+        if not original_trans:
+            return {'success': False, 'message': 'Transaction not found'}
+        
+        # Get current factory context
+        if not factory:
+            return {'success': False, 'message': 'Factory context is required'}
+        
+        # Get the original transaction details
+        original_type = original_trans.get('transaction_type', '')
+        original_quantity = float(original_trans.get('quantity', 0) or 0)
+        original_notes = original_trans.get('notes', '') or ''
+        
+        # Handle deletion reversal (restore the item)
+        if original_type == 'محذوف':
+            # Try to extract the backed-up item data from notes
+            import re
+            match = re.search(r'\[DELETED_ITEM:(.+)\]$', original_notes)
+            if match:
+                try:
+                    item_data = json.loads(match.group(1))
+                    
+                    # Check if item already exists (shouldn't, but be safe)
+                    result = check_item_exists(item_id, factory)
+                    if result['exists']:
+                        return {'success': False, 'message': f'Cannot restore: Item "{item_id}" already exists in this factory'}
+                    
+                    # Restore the item to the stock file
+                    stock_file = get_stock_file(factory)
+                    append_csv(stock_file, STOCK_HEADERS, item_data)
+                    
+                    # Remove the deletion transaction from the log
+                    transactions.pop(original_index)
+                    write_csv(TRANSACTIONS_FILE, TRANSACTION_HEADERS, transactions)
+                    
+                    return {
+                        'success': True,
+                        'message': f'Item "{item_data.get("name", item_id)}" has been restored with {item_data.get("net_stock", 0)} units'
+                    }
+                except json.JSONDecodeError:
+                    return {'success': False, 'message': 'Cannot reverse: Item backup data is corrupted'}
+            else:
+                return {'success': False, 'message': 'Cannot reverse: This deletion does not contain backup data for restoration'}
+        
+        # Determine the stock change needed to undo the transaction
+        # For Arabic transaction types
+        incoming_types = ['وارد', 'تحويل داخلي (وارد)', 'تحويل داخلي (وارد جديد)', 'رصيد افتتاحي', 'INCOMING']
+        outgoing_types = ['صادر', 'تحويل داخلي (صادر)', 'OUTGOING']
+        
+        if original_type in incoming_types:
+            # Undo an incoming: subtract the quantity
+            stock_change = -original_quantity
+            incoming_change = -original_quantity
+            outgoing_change = 0
+        elif original_type in outgoing_types:
+            # Undo an outgoing: add the quantity back
+            stock_change = original_quantity
+            incoming_change = 0
+            outgoing_change = -original_quantity
+        else:
+            # For other types (like edits), don't allow reversal
+            return {'success': False, 'message': f'Cannot reverse transaction of type: {original_type}'}
+        
+        result = check_item_exists(item_id, factory)
+        if not result['exists']:
+            return {'success': False, 'message': f'Item "{item_id}" not found in current factory'}
+        
+        item = result['item']
+        current_stock = float(item.get('net_stock', 0) or 0)
+        
+        # For undoing an incoming (removing stock), check we have enough
+        if stock_change < 0 and abs(stock_change) > current_stock:
+            return {'success': False, 'message': f'Cannot reverse: insufficient stock. Current: {current_stock}, needed: {abs(stock_change)}'}
+        
+        new_stock = current_stock + stock_change
+        
+        # Update the item's stock
+        stock_file = get_stock_file(factory)
+        items = read_csv(stock_file, STOCK_HEADERS)
+        
+        for stock_item in items:
+            if stock_item['id'].strip().upper() == item_id.upper():
+                stock_item['total_incoming'] = max(0, float(stock_item.get('total_incoming', 0) or 0) + incoming_change)
+                stock_item['total_outgoing'] = max(0, float(stock_item.get('total_outgoing', 0) or 0) + outgoing_change)
+                stock_item['net_stock'] = new_stock
+                stock_item['last_updated'] = get_current_date()
+                break
+        
+        write_csv(stock_file, STOCK_HEADERS, items)
+        
+        # Remove the transaction from the log
+        transactions.pop(original_index)
+        write_csv(TRANSACTIONS_FILE, TRANSACTION_HEADERS, transactions)
+        
+        action = 'added back to' if stock_change > 0 else 'removed from'
+        return {
+            'success': True, 
+            'message': f'Transaction reversed and removed. {abs(stock_change)} {item.get("unit", "units")} {action} stock. New balance: {new_stock}'
+        }
+        
+    except Exception as e:
+        import traceback
+        print(f"Error reversing transaction: {e}")
+        traceback.print_exc()
+        return {'success': False, 'message': str(e)}
+
+
+@eel.expose
 def edit_ledger_transaction(timestamp, entity_id, new_data):
     """Edit a ledger transaction log entry. Uses timestamp + entity_id as unique identifier."""
     try:
@@ -939,6 +1342,131 @@ def delete_ledger_transaction(timestamp, entity_id):
         return {'success': True, 'message': 'Ledger transaction deleted successfully'}
     except Exception as e:
         print(f"Error deleting ledger transaction: {e}")
+        return {'success': False, 'message': str(e)}
+
+
+@eel.expose
+def reverse_ledger_transaction(timestamp, entity_id):
+    """Reverse a ledger transaction by undoing its effects and removing it from the log.
+    
+    This restores the state as if the transaction never happened:
+    - Subtracts the original debit from the entity's total debit
+    - Subtracts the original credit from the entity's total credit
+    - Recalculates the balance
+    - For deletions: restores the deleted entity
+    - Removes the transaction from the log
+    """
+    try:
+        import json
+        import re
+        transactions = read_csv(LEDGER_LOG_FILE, LEDGER_LOG_HEADERS)
+        
+        # Find the original transaction
+        original_trans = None
+        original_index = -1
+        for i, trans in enumerate(transactions):
+            if trans.get('timestamp') == timestamp and trans.get('entity_id') == entity_id:
+                original_trans = trans
+                original_index = i
+                break
+        
+        if not original_trans:
+            return {'success': False, 'message': 'Ledger transaction not found'}
+        
+        # Get the original transaction details
+        ledger_type = original_trans.get('ledger_type', '')
+        original_type = original_trans.get('transaction_type', '')
+        original_debit = float(original_trans.get('debit', 0) or 0)
+        original_credit = float(original_trans.get('credit', 0) or 0)
+        original_statement = original_trans.get('statement', '') or ''
+        
+        # Get ledger file and headers based on type
+        ledger_files = {
+            'customer': (CUSTOMERS_FILE, CUSTOMER_HEADERS, 'id', 'name'),
+            'supplier': (SUPPLIERS_FILE, SUPPLIER_HEADERS, 'id', 'name'),
+            'treasury': (TREASURY_FILE, TREASURY_HEADERS, 'account_number', 'account_name'),
+            'covenant': (COVENANTS_FILE, COVENANT_HEADERS, 'id', 'employee_name'),
+            'advance': (ADVANCES_FILE, ADVANCE_HEADERS, 'id', 'employee_name')
+        }
+        
+        if ledger_type not in ledger_files:
+            return {'success': False, 'message': f'Unknown ledger type: {ledger_type}'}
+        
+        ledger_file, ledger_headers, id_field, name_field = ledger_files[ledger_type]
+        
+        # Handle deletion reversal (restore the entity)
+        if original_type == 'حذف':
+            # Try to extract the backed-up entity data from statement
+            match = re.search(r'\[DELETED_ENTITY:(.+)\]$', original_statement)
+            if match:
+                try:
+                    entity_data = json.loads(match.group(1))
+                    
+                    # Check if entity already exists (shouldn't, but be safe)
+                    entities = read_csv(ledger_file, ledger_headers)
+                    for e in entities:
+                        if e.get(id_field, '').strip().upper() == entity_id.strip().upper():
+                            return {'success': False, 'message': f'Cannot restore: Entity "{entity_id}" already exists'}
+                    
+                    # Restore the entity to the ledger file
+                    append_csv(ledger_file, ledger_headers, entity_data)
+                    
+                    # Remove the deletion transaction from the log
+                    transactions.pop(original_index)
+                    write_csv(LEDGER_LOG_FILE, LEDGER_LOG_HEADERS, transactions)
+                    
+                    entity_name = entity_data.get(name_field, entity_id)
+                    return {
+                        'success': True,
+                        'message': f'"{entity_name}" has been restored with balance of {entity_data.get("balance", 0)}'
+                    }
+                except json.JSONDecodeError:
+                    return {'success': False, 'message': 'Cannot reverse: Entity backup data is corrupted'}
+            else:
+                return {'success': False, 'message': 'Cannot reverse: This deletion does not contain backup data for restoration'}
+        
+        # Read the ledger entities for regular transaction reversal
+        entities = read_csv(ledger_file, ledger_headers)
+        
+        # Find the entity
+        entity = None
+        entity_index = -1
+        for i, e in enumerate(entities):
+            if e.get(id_field, '').strip().upper() == entity_id.strip().upper():
+                entity = e
+                entity_index = i
+                break
+        
+        if not entity:
+            return {'success': False, 'message': f'Entity "{entity_id}" not found in {ledger_type} ledger'}
+        
+        # Calculate the undo: subtract original debit and credit
+        current_balance = float(entity.get('balance', 0) or 0)
+        # Original transaction changed balance by: +debit -credit
+        # To undo: -debit +credit
+        balance_change = -original_debit + original_credit
+        new_balance = current_balance + balance_change
+        
+        # Update the entity's totals and balance
+        entities[entity_index]['debit'] = max(0, float(entities[entity_index].get('debit', 0) or 0) - original_debit)
+        entities[entity_index]['credit'] = max(0, float(entities[entity_index].get('credit', 0) or 0) - original_credit)
+        entities[entity_index]['balance'] = new_balance
+        
+        write_csv(ledger_file, ledger_headers, entities)
+        
+        # Remove the transaction from the log
+        transactions.pop(original_index)
+        write_csv(LEDGER_LOG_FILE, LEDGER_LOG_HEADERS, transactions)
+        
+        return {
+            'success': True, 
+            'message': f'Transaction reversed and removed. New balance: {new_balance}'
+        }
+        
+    except Exception as e:
+        import traceback
+        print(f"Error reversing ledger transaction: {e}")
+        traceback.print_exc()
         return {'success': False, 'message': str(e)}
 
 
@@ -1022,8 +1550,14 @@ def delete_item(item_id, password='', factory=''):
     
     if item_to_delete:
         write_csv(stock_file, STOCK_HEADERS, new_items)
-        log_transaction(item_id, item_to_delete['name'], 'محذوف', 0, item_to_delete['net_stock'], 0, '', 0, '', '', 'تم حذف الصنف من المخزون')
+        # Store full item data in notes as JSON for potential reversal
+        import json
+        item_backup = json.dumps(item_to_delete, ensure_ascii=False)
+        deletion_notes = f'تم حذف الصنف من المخزون [DELETED_ITEM:{item_backup}]'
+        log_transaction(item_id, item_to_delete['name'], 'محذوف', 0, item_to_delete['net_stock'], 0, '', 0, '', '', deletion_notes, '', factory)
         return {'success': True, 'message': f'Item "{item_to_delete["name"]}" deleted successfully'}
+    
+    return {'success': False, 'message': f'Item with ID "{item_id}" not found'}
     
     return {'success': False, 'message': f'Item with ID "{item_id}" not found'}
 
@@ -1095,7 +1629,7 @@ def edit_item(item_id, name, category, unit, location, supplier, unit_price, min
                 changes.append(f"الرصيد الافتتاحي: {old_values['starting_balance']} → {item['starting_balance']}")
             
             notes = 'تعديل: ' + ', '.join(changes) if changes else 'تم تعديل البيانات'
-            log_transaction(item['id'], item['name'], 'تعديل', 0, item['net_stock'], item['net_stock'], '', 0, '', '', notes)
+            log_transaction(item['id'], item['name'], 'تعديل', 0, item['net_stock'], item['net_stock'], '', 0, '', '', notes, '', factory)
             
             return {'success': True, 'message': f'Item "{item["name"]}" updated successfully'}
     
@@ -1418,8 +1952,11 @@ def delete_customer(customer_id):
     items = [item for item in items if item['id'].strip().upper() != customer_id]
     write_csv(CUSTOMERS_FILE, CUSTOMER_HEADERS, items)
     
-    # Log the deletion
-    log_ledger_transaction('customer', customer_id, deleted_item['name'], 'حذف', 0, 0, deleted_item.get('balance', 0), 0, '', '', 'تم حذف العميل')
+    # Log the deletion with backup data for potential reversal
+    import json
+    entity_backup = json.dumps(deleted_item, ensure_ascii=False)
+    deletion_statement = f'تم حذف العميل [DELETED_ENTITY:{entity_backup}]'
+    log_ledger_transaction('customer', customer_id, deleted_item['name'], 'حذف', 0, 0, deleted_item.get('balance', 0), 0, '', '', deletion_statement)
     
     return {'success': True, 'message': f'Customer "{deleted_item["name"]}" deleted successfully'}
 
@@ -1445,8 +1982,11 @@ def delete_supplier(supplier_id):
     items = [item for item in items if item['id'].strip().upper() != supplier_id]
     write_csv(SUPPLIERS_FILE, SUPPLIER_HEADERS, items)
     
-    # Log the deletion
-    log_ledger_transaction('supplier', supplier_id, deleted_item['name'], 'حذف', 0, 0, deleted_item.get('balance', 0), 0, '', '', 'تم حذف المورد')
+    # Log the deletion with backup data for potential reversal
+    import json
+    entity_backup = json.dumps(deleted_item, ensure_ascii=False)
+    deletion_statement = f'تم حذف المورد [DELETED_ENTITY:{entity_backup}]'
+    log_ledger_transaction('supplier', supplier_id, deleted_item['name'], 'حذف', 0, 0, deleted_item.get('balance', 0), 0, '', '', deletion_statement)
     
     return {'success': True, 'message': f'Supplier "{deleted_item["name"]}" deleted successfully'}
 
@@ -1472,8 +2012,11 @@ def delete_treasury(account_number):
     items = [item for item in items if (item.get('account_number', '') or '').strip().lower() != account_number.lower()]
     write_csv(TREASURY_FILE, TREASURY_HEADERS, items)
     
-    # Log the deletion
-    log_ledger_transaction('treasury', account_number, deleted_item['account_name'], 'حذف', 0, 0, deleted_item.get('balance', 0), 0, '', '', 'تم حذف حساب الخزينة')
+    # Log the deletion with backup data for potential reversal
+    import json
+    entity_backup = json.dumps(deleted_item, ensure_ascii=False)
+    deletion_statement = f'تم حذف حساب الخزينة [DELETED_ENTITY:{entity_backup}]'
+    log_ledger_transaction('treasury', account_number, deleted_item['account_name'], 'حذف', 0, 0, deleted_item.get('balance', 0), 0, '', '', deletion_statement)
     
     return {'success': True, 'message': f'Treasury account "{deleted_item["account_name"]}" deleted successfully'}
 
@@ -1499,8 +2042,11 @@ def delete_covenant(covenant_id):
     items = [item for item in items if item['id'].strip().upper() != covenant_id]
     write_csv(COVENANTS_FILE, COVENANT_HEADERS, items)
     
-    # Log the deletion
-    log_ledger_transaction('covenant', covenant_id, deleted_item['employee_name'], 'حذف', 0, 0, deleted_item.get('balance', 0), 0, '', '', 'تم حذف العهدة')
+    # Log the deletion with backup data for potential reversal
+    import json
+    entity_backup = json.dumps(deleted_item, ensure_ascii=False)
+    deletion_statement = f'تم حذف العهدة [DELETED_ENTITY:{entity_backup}]'
+    log_ledger_transaction('covenant', covenant_id, deleted_item['employee_name'], 'حذف', 0, 0, deleted_item.get('balance', 0), 0, '', '', deletion_statement)
     
     return {'success': True, 'message': f'Covenant for "{deleted_item["employee_name"]}" deleted successfully'}
 
@@ -1526,10 +2072,13 @@ def delete_advance(advance_id):
     items = [item for item in items if item['id'].strip().upper() != advance_id]
     write_csv(ADVANCES_FILE, ADVANCE_HEADERS, items)
     
-    # Log the deletion
-    log_ledger_transaction('advance', advance_id, deleted_item['employee_name'], 'حذف', 0, 0, deleted_item.get('balance', 0), 0, '', '', 'تم حذف السلفة')
+    # Log the deletion with backup data for potential reversal
+    import json
+    entity_backup = json.dumps(deleted_item, ensure_ascii=False)
+    deletion_statement = f'تم حذف السلفة [DELETED_ENTITY:{entity_backup}]'
+    log_ledger_transaction('advance', advance_id, deleted_item['employee_name'], 'حذف', 0, 0, deleted_item.get('balance', 0), 0, '', '', deletion_statement)
     
-    return {'success': True, 'message': f'Advance for "{deleted_item["employee_name"]}" deleted successfully'}
+    return {'success': True, 'message': f'Advance for "{deleted_item["employee_name"]}" deleted successfully'} if deleted_item else {"success": False,}
 
 
 @eel.expose
@@ -1666,7 +2215,7 @@ def add_or_update_customer(customer_id, name, phone, email, registration_date, d
                 break
         
         write_csv(CUSTOMERS_FILE, CUSTOMER_HEADERS, items)
-        log_ledger_transaction('customer', customer_id, name.strip(), 'تحديث', debit, credit, prev_balance, new_balance, payment_method, document_number, statement)
+        log_ledger_transaction('customer', customer_id, name.strip(), 'تحديث', debit, credit, prev_balance, new_balance, payment_method, document_number, statement, registration_date)
         return {'success': True, 'message': f'Customer "{name}" updated successfully. New balance: {new_balance}'}
     else:
         # Create new customer
@@ -1687,7 +2236,7 @@ def add_or_update_customer(customer_id, name, phone, email, registration_date, d
         }
         
         append_csv(CUSTOMERS_FILE, CUSTOMER_HEADERS, new_customer)
-        log_ledger_transaction('customer', customer_id, name.strip(), 'جديد', debit, credit, 0, balance, payment_method, document_number.strip() if document_number else '', statement.strip() if statement else '')
+        log_ledger_transaction('customer', customer_id, name.strip(), 'جديد', debit, credit, 0, balance, payment_method, document_number.strip() if document_number else '', statement.strip() if statement else '', registration_date)
         return {'success': True, 'message': f'Customer "{name}" added successfully with balance of {balance}'}
 
 
@@ -1799,7 +2348,7 @@ def add_or_update_supplier(supplier_id, name, phone, email, registration_date, d
                 break
         
         write_csv(SUPPLIERS_FILE, SUPPLIER_HEADERS, items)
-        log_ledger_transaction('supplier', supplier_id, name.strip(), 'تحديث', debit, credit, prev_balance, new_balance, payment_method, document_number, statement)
+        log_ledger_transaction('supplier', supplier_id, name.strip(), 'تحديث', debit, credit, prev_balance, new_balance, payment_method, document_number, statement, registration_date)
         return {'success': True, 'message': f'Supplier "{name}" updated successfully. New balance: {new_balance}'}
     else:
         balance = opening_balance + debit - credit
@@ -1819,7 +2368,7 @@ def add_or_update_supplier(supplier_id, name, phone, email, registration_date, d
         }
         
         append_csv(SUPPLIERS_FILE, SUPPLIER_HEADERS, new_supplier)
-        log_ledger_transaction('supplier', supplier_id, name.strip(), 'جديد', debit, credit, 0, balance, payment_method, document_number.strip() if document_number else '', statement.strip() if statement else '')
+        log_ledger_transaction('supplier', supplier_id, name.strip(), 'جديد', debit, credit, 0, balance, payment_method, document_number.strip() if document_number else '', statement.strip() if statement else '', registration_date)
         return {'success': True, 'message': f'Supplier "{name}" added successfully with balance of {balance}'}
 
 
@@ -1936,7 +2485,7 @@ def add_or_update_treasury(account_number, account_name, registration_date, docu
                 break
         
         write_csv(TREASURY_FILE, TREASURY_HEADERS, items)
-        log_ledger_transaction('treasury', account_number, account_name or account_number, 'تحديث', debit, credit, prev_balance, new_balance, payment_method, document_number, statement)
+        log_ledger_transaction('treasury', account_number, account_name or account_number, 'تحديث', debit, credit, prev_balance, new_balance, payment_method, document_number, statement, registration_date)
         return {'success': True, 'message': f'Treasury account "{account_number}" updated. New balance: {new_balance}'}
     else:
         # Create new treasury account
@@ -1955,7 +2504,7 @@ def add_or_update_treasury(account_number, account_name, registration_date, docu
         }
         
         append_csv(TREASURY_FILE, TREASURY_HEADERS, new_account)
-        log_ledger_transaction('treasury', account_number, account_name or account_number, 'جديد', debit, credit, 0, balance, payment_method, document_number.strip() if document_number else '', statement.strip() if statement else '')
+        log_ledger_transaction('treasury', account_number, account_name or account_number, 'جديد', debit, credit, 0, balance, payment_method, document_number.strip() if document_number else '', statement.strip() if statement else '', registration_date)
         return {'success': True, 'message': f'Treasury account "{account_number}" added with balance of {balance}'}
 
 
@@ -2313,7 +2862,7 @@ def add_or_update_covenant(covenant_id, employee_name, phone, registration_date,
                 break
         
         write_csv(COVENANTS_FILE, COVENANT_HEADERS, items)
-        log_ledger_transaction('covenant', covenant_id, employee_name.strip(), 'تحديث', debit, credit, prev_balance, new_balance, payment_method, document_number, statement)
+        log_ledger_transaction('covenant', covenant_id, employee_name.strip(), 'تحديث', debit, credit, prev_balance, new_balance, payment_method, document_number, statement, registration_date)
         return {'success': True, 'message': f'Covenant for "{employee_name}" updated. New balance: {new_balance}'}
     else:
         balance = opening_balance + debit - credit
@@ -2332,7 +2881,7 @@ def add_or_update_covenant(covenant_id, employee_name, phone, registration_date,
         }
         
         append_csv(COVENANTS_FILE, COVENANT_HEADERS, new_covenant)
-        log_ledger_transaction('covenant', covenant_id, employee_name.strip(), 'جديد', debit, credit, 0, balance, payment_method, document_number.strip() if document_number else '', statement.strip() if statement else '')
+        log_ledger_transaction('covenant', covenant_id, employee_name.strip(), 'جديد', debit, credit, 0, balance, payment_method, document_number.strip() if document_number else '', statement.strip() if statement else '', registration_date)
         return {'success': True, 'message': f'Covenant for "{employee_name}" added with balance of {balance}'}
 
 
@@ -2444,7 +2993,7 @@ def add_or_update_advance(advance_id, employee_name, phone, registration_date, d
                 break
         
         write_csv(ADVANCES_FILE, ADVANCE_HEADERS, items)
-        log_ledger_transaction('advance', advance_id, employee_name.strip(), 'تحديث', debit, credit, prev_balance, new_balance, payment_method, document_number, statement)
+        log_ledger_transaction('advance', advance_id, employee_name.strip(), 'تحديث', debit, credit, prev_balance, new_balance, payment_method, document_number, statement, registration_date)
         return {'success': True, 'message': f'Advance for "{employee_name}" updated. New balance: {new_balance}'}
     else:
         balance = opening_balance + debit - credit
@@ -2463,7 +3012,7 @@ def add_or_update_advance(advance_id, employee_name, phone, registration_date, d
         }
         
         append_csv(ADVANCES_FILE, ADVANCE_HEADERS, new_advance)
-        log_ledger_transaction('advance', advance_id, employee_name.strip(), 'جديد', debit, credit, 0, balance, payment_method, document_number.strip() if document_number else '', statement.strip() if statement else '')
+        log_ledger_transaction('advance', advance_id, employee_name.strip(), 'جديد', debit, credit, 0, balance, payment_method, document_number.strip() if document_number else '', statement.strip() if statement else '', registration_date)
         return {'success': True, 'message': f'Advance for "{employee_name}" added with balance of {balance}'}
 
 
@@ -2506,8 +3055,14 @@ def get_advances_total_balance():
 # ============================================
 
 @eel.expose
-def import_item_from_cloud(factory_key, item_data):
-    """Import a stock item from cloud sync - updates if exists, adds if new"""
+def import_item_from_cloud(factory_key, item_data, skip_existing=False):
+    """Import a stock item from cloud sync - updates if exists, adds if new
+    
+    Args:
+        factory_key: The factory identifier
+        item_data: The item data from cloud
+        skip_existing: If True, skip items that already exist locally (non-destructive)
+    """
     try:
         stock_file = get_stock_file(factory_key)
         items = read_csv(stock_file, STOCK_HEADERS)
@@ -2520,6 +3075,10 @@ def import_item_from_cloud(factory_key, item_data):
             if item.get('id', '').strip().upper() == item_id:
                 existing_idx = idx
                 break
+        
+        # Skip if item exists and skip_existing is True
+        if existing_idx is not None and skip_existing:
+            return {'success': True, 'skipped': True}
         
         # Prepare item data
         new_item = {
@@ -2551,8 +3110,13 @@ def import_item_from_cloud(factory_key, item_data):
 
 
 @eel.expose
-def import_customer_from_cloud(customer_data):
-    """Import a customer from cloud sync"""
+def import_customer_from_cloud(customer_data, skip_existing=False):
+    """Import a customer from cloud sync
+    
+    Args:
+        customer_data: The customer data from cloud
+        skip_existing: If True, skip customers that already exist locally (non-destructive)
+    """
     try:
         customers = read_csv(CUSTOMERS_FILE, CUSTOMER_HEADERS)
         customer_id = str(customer_data.get('id', '')).strip()
@@ -2562,6 +3126,10 @@ def import_customer_from_cloud(customer_data):
             if c.get('id', '').strip() == customer_id:
                 existing_idx = idx
                 break
+        
+        # Skip if customer exists and skip_existing is True
+        if existing_idx is not None and skip_existing:
+            return {'success': True, 'skipped': True}
         
         new_customer = {
             'id': customer_id,
@@ -2591,8 +3159,13 @@ def import_customer_from_cloud(customer_data):
 
 
 @eel.expose
-def import_supplier_from_cloud(supplier_data):
-    """Import a supplier from cloud sync"""
+def import_supplier_from_cloud(supplier_data, skip_existing=False):
+    """Import a supplier from cloud sync
+    
+    Args:
+        supplier_data: The supplier data from cloud
+        skip_existing: If True, skip suppliers that already exist locally (non-destructive)
+    """
     try:
         suppliers = read_csv(SUPPLIERS_FILE, SUPPLIER_HEADERS)
         supplier_id = str(supplier_data.get('id', '')).strip()
@@ -2602,6 +3175,10 @@ def import_supplier_from_cloud(supplier_data):
             if s.get('id', '').strip() == supplier_id:
                 existing_idx = idx
                 break
+        
+        # Skip if supplier exists and skip_existing is True
+        if existing_idx is not None and skip_existing:
+            return {'success': True, 'skipped': True}
         
         new_supplier = {
             'id': supplier_id,
@@ -2631,8 +3208,13 @@ def import_supplier_from_cloud(supplier_data):
 
 
 @eel.expose
-def import_treasury_from_cloud(treasury_data):
-    """Import a treasury account from cloud sync"""
+def import_treasury_from_cloud(treasury_data, skip_existing=False):
+    """Import a treasury account from cloud sync
+    
+    Args:
+        treasury_data: The treasury account data from cloud
+        skip_existing: If True, skip accounts that already exist locally (non-destructive)
+    """
     try:
         treasury = read_csv(TREASURY_FILE, TREASURY_HEADERS)
         account_number = str(treasury_data.get('account_number', '')).strip()
@@ -2642,6 +3224,10 @@ def import_treasury_from_cloud(treasury_data):
             if t.get('account_number', '').strip() == account_number:
                 existing_idx = idx
                 break
+        
+        # Skip if account exists and skip_existing is True
+        if existing_idx is not None and skip_existing:
+            return {'success': True, 'skipped': True}
         
         new_account = {
             'account_number': account_number,
@@ -2669,9 +3255,20 @@ def import_treasury_from_cloud(treasury_data):
 
 
 @eel.expose
-def import_treasury_config_from_cloud(config_data):
-    """Import treasury configuration from cloud sync"""
+def import_treasury_config_from_cloud(config_data, skip_existing=False):
+    """Import treasury configuration from cloud sync
+    
+    Args:
+        config_data: The treasury config data from cloud
+        skip_existing: If True, skip if config already exists locally (non-destructive)
+    """
     try:
+        # Skip if config exists and skip_existing is True
+        if skip_existing and os.path.exists(TREASURY_CONFIG_FILE):
+            existing = read_csv(TREASURY_CONFIG_FILE, TREASURY_CONFIG_HEADERS)
+            if existing and len(existing) > 0:
+                return {'success': True, 'skipped': True}
+        
         config = {
             'initialized': str(config_data.get('initialized', False)).lower(),
             'starting_capital': config_data.get('starting_capital', 0),
@@ -2686,6 +3283,207 @@ def import_treasury_config_from_cloud(config_data):
         return {'success': True}
     except Exception as e:
         print(f"Error importing treasury config from cloud: {e}")
+        return {'success': False, 'error': str(e)}
+
+
+@eel.expose
+def import_covenant_from_cloud(covenant_data, skip_existing=False):
+    """Import a covenant from cloud sync"""
+    try:
+        covenants = read_csv(COVENANTS_FILE, COVENANT_HEADERS)
+        covenant_id = str(covenant_data.get('id', '')).strip()
+        
+        existing_idx = None
+        for idx, c in enumerate(covenants):
+            if c.get('id', '').strip() == covenant_id:
+                existing_idx = idx
+                break
+        
+        if existing_idx is not None and skip_existing:
+            return {'success': True, 'skipped': True}
+        
+        new_covenant = {
+            'id': covenant_id,
+            'employee_name': covenant_data.get('employee_name', ''),
+            'phone': covenant_data.get('phone', ''),
+            'registration_date': covenant_data.get('registration_date', ''),
+            'document_number': covenant_data.get('document_number', ''),
+            'opening_balance': covenant_data.get('opening_balance', 0),
+            'debit': covenant_data.get('debit', 0),
+            'credit': covenant_data.get('credit', 0),
+            'balance': covenant_data.get('balance', 0),
+            'payment_method': covenant_data.get('payment_method', ''),
+            'statement': covenant_data.get('statement', '')
+        }
+        
+        if existing_idx is not None:
+            covenants[existing_idx] = new_covenant
+        else:
+            covenants.append(new_covenant)
+        
+        write_csv(COVENANTS_FILE, COVENANT_HEADERS, covenants)
+        return {'success': True}
+    except Exception as e:
+        print(f"Error importing covenant from cloud: {e}")
+        return {'success': False, 'error': str(e)}
+
+
+@eel.expose
+def import_advance_from_cloud(advance_data, skip_existing=False):
+    """Import an advance from cloud sync"""
+    try:
+        advances = read_csv(ADVANCES_FILE, ADVANCE_HEADERS)
+        advance_id = str(advance_data.get('id', '')).strip()
+        
+        existing_idx = None
+        for idx, a in enumerate(advances):
+            if a.get('id', '').strip() == advance_id:
+                existing_idx = idx
+                break
+        
+        if existing_idx is not None and skip_existing:
+            return {'success': True, 'skipped': True}
+        
+        new_advance = {
+            'id': advance_id,
+            'employee_name': advance_data.get('employee_name', ''),
+            'phone': advance_data.get('phone', ''),
+            'registration_date': advance_data.get('registration_date', ''),
+            'document_number': advance_data.get('document_number', ''),
+            'opening_balance': advance_data.get('opening_balance', 0),
+            'debit': advance_data.get('debit', 0),
+            'credit': advance_data.get('credit', 0),
+            'balance': advance_data.get('balance', 0),
+            'payment_method': advance_data.get('payment_method', ''),
+            'statement': advance_data.get('statement', '')
+        }
+        
+        if existing_idx is not None:
+            advances[existing_idx] = new_advance
+        else:
+            advances.append(new_advance)
+        
+        write_csv(ADVANCES_FILE, ADVANCE_HEADERS, advances)
+        return {'success': True}
+    except Exception as e:
+        print(f"Error importing advance from cloud: {e}")
+        return {'success': False, 'error': str(e)}
+
+
+@eel.expose
+def import_stock_transactions_from_cloud(transactions, skip_existing=False):
+    """Import stock transactions from cloud sync (batch)
+    
+    Args:
+        transactions: List of stock transaction dicts from cloud
+        skip_existing: If True, skip transactions that already exist locally
+    """
+    try:
+        existing = read_csv(STOCK_TRANSACTIONS_FILE, STOCK_TRANSACTION_HEADERS)
+        
+        # Build a set of existing transaction keys for dedup
+        existing_keys = set()
+        if skip_existing:
+            for t in existing:
+                key = f"{t.get('timestamp', '')}_{t.get('item_id', '')}_{t.get('factory', '')}"
+                existing_keys.add(key)
+        
+        imported = 0
+        skipped = 0
+        
+        for t in transactions:
+            key = f"{t.get('timestamp', '')}_{t.get('item_id', '')}_{t.get('factory', '')}"
+            
+            if skip_existing and key in existing_keys:
+                skipped += 1
+                continue
+            
+            # Also skip if already exists (dedup even when not skip_existing mode, to avoid dupes)
+            if key in existing_keys:
+                skipped += 1
+                continue
+            
+            row = {
+                'timestamp': t.get('timestamp', ''),
+                'transaction_date': t.get('transaction_date', ''),
+                'item_id': t.get('item_id', ''),
+                'item_name': t.get('item_name', ''),
+                'transaction_type': t.get('transaction_type', ''),
+                'quantity': t.get('quantity', 0),
+                'previous_stock': t.get('previous_stock', 0),
+                'new_stock': t.get('new_stock', 0),
+                'supplier': t.get('supplier', ''),
+                'price': t.get('price', 0),
+                'document_type': t.get('document_type', ''),
+                'document_number': t.get('document_number', ''),
+                'notes': t.get('notes', ''),
+                'factory': t.get('factory', '')
+            }
+            append_csv(STOCK_TRANSACTIONS_FILE, STOCK_TRANSACTION_HEADERS, row)
+            existing_keys.add(key)
+            imported += 1
+        
+        print(f"[CLOUD] Imported {imported} stock transactions, skipped {skipped}")
+        return {'success': True, 'imported': imported, 'skipped': skipped}
+    except Exception as e:
+        print(f"Error importing stock transactions from cloud: {e}")
+        return {'success': False, 'error': str(e)}
+
+
+@eel.expose
+def import_ledger_transactions_from_cloud(ledger_type, transactions, skip_existing=False):
+    """Import ledger transactions from cloud sync (batch, per module)
+    
+    Args:
+        ledger_type: 'customer', 'supplier', 'treasury', 'covenant', 'advance'
+        transactions: List of ledger transaction dicts from cloud
+        skip_existing: If True, skip transactions that already exist locally
+    """
+    try:
+        transaction_file = LEDGER_TRANSACTION_FILES.get(ledger_type)
+        if not transaction_file:
+            return {'success': False, 'error': f'Unknown ledger type: {ledger_type}'}
+        
+        existing = read_csv(transaction_file, LEDGER_TRANSACTION_HEADERS)
+        
+        # Build a set of existing transaction keys for dedup
+        existing_keys = set()
+        for t in existing:
+            key = f"{t.get('timestamp', '')}_{t.get('entity_id', '')}"
+            existing_keys.add(key)
+        
+        imported = 0
+        skipped = 0
+        
+        for t in transactions:
+            key = f"{t.get('timestamp', '')}_{t.get('entity_id', '')}"
+            
+            if key in existing_keys:
+                skipped += 1
+                continue
+            
+            row = {
+                'timestamp': t.get('timestamp', ''),
+                'transaction_date': t.get('transaction_date', ''),
+                'entity_id': t.get('entity_id', ''),
+                'entity_name': t.get('entity_name', ''),
+                'transaction_type': t.get('transaction_type', ''),
+                'debit': t.get('debit', 0),
+                'credit': t.get('credit', 0),
+                'previous_balance': t.get('previous_balance', 0),
+                'new_balance': t.get('new_balance', 0),
+                'payment_method': t.get('payment_method', ''),
+                'document_number': t.get('document_number', ''),
+                'statement': t.get('statement', '')
+            }
+            append_csv(transaction_file, LEDGER_TRANSACTION_HEADERS, row)
+            existing_keys.add(key)
+            imported += 1
+        
+        print(f"[CLOUD] Imported {imported} {ledger_type} transactions, skipped {skipped}")
+        return {'success': True, 'imported': imported, 'skipped': skipped}
+    except Exception as e:
+        print(f"Error importing {ledger_type} transactions from cloud: {e}")
         return {'success': False, 'error': str(e)}
 
 
@@ -2711,12 +3509,158 @@ def clear_all_local_data():
         if os.path.exists(TREASURY_CONFIG_FILE):
             os.remove(TREASURY_CONFIG_FILE)
         
-        # Note: We don't clear transaction logs as they are audit trails
+        # Clear transaction files (they will be re-downloaded from cloud)
+        write_csv(STOCK_TRANSACTIONS_FILE, STOCK_TRANSACTION_HEADERS, [])
+        for ledger_type, file_path in LEDGER_TRANSACTION_FILES.items():
+            write_csv(file_path, LEDGER_TRANSACTION_HEADERS, [])
         
         return {'success': True, 'message': 'All local data cleared'}
     except Exception as e:
         print(f"Error clearing local data: {e}")
         return {'success': False, 'message': str(e)}
+
+
+@eel.expose
+def get_app_version():
+    """Get current app version"""
+    return APP_VERSION
+
+
+@eel.expose
+def get_version_info():
+    """Get version info from local version.json file"""
+    try:
+        import json
+        if os.path.exists(VERSION_FILE):
+            with open(VERSION_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        return {"version": APP_VERSION, "build_date": "", "changelog": []}
+    except Exception as e:
+        print(f"[ERROR] Failed to read version info: {e}")
+        return {"version": APP_VERSION, "build_date": "", "changelog": []}
+
+
+@eel.expose
+def download_update(download_url, version):
+    """Download a new version of the app from Google Drive"""
+    import re
+
+    if not download_url or str(download_url).strip() in ('', 'None', 'null'):
+        return {
+            'success': False,
+            'error': 'No download URL available for this version. Please check with your administrator.'
+        }
+
+    try:
+        # Get the user's Downloads folder
+        downloads_folder = os.path.join(os.path.expanduser('~'), 'Downloads')
+        if not os.path.exists(downloads_folder):
+            os.makedirs(downloads_folder)
+        
+        filename = f"EnterprisFlow_v{version}.exe"
+        save_path = os.path.join(downloads_folder, filename)
+        
+        print(f"[UPDATE] Downloading update v{version}...")
+        print(f"[UPDATE] URL: {download_url}")
+        print(f"[UPDATE] Save to: {save_path}")
+        
+        # Extract file ID from Google Drive URL
+        file_id = None
+        match = re.search(r'id=([a-zA-Z0-9_-]+)', download_url)
+        if match:
+            file_id = match.group(1)
+        else:
+            match = re.search(r'/d/([a-zA-Z0-9_-]+)', download_url)
+            if match:
+                file_id = match.group(1)
+        
+        if not file_id:
+            raise Exception(f"Could not extract file ID from URL: {download_url}")
+        
+        print(f"[UPDATE] Google Drive file ID: {file_id}")
+
+        # Remove any leftover partial file from a previous failed attempt
+        if os.path.exists(save_path):
+            os.remove(save_path)
+
+        # Download using requests.
+        # Google Drive switched to drive.usercontent.google.com for direct downloads.
+        # Using confirm=t and authuser=0 bypasses the virus-scan warning page entirely.
+        try:
+            import requests
+        except ImportError:
+            import subprocess as sp
+            sp.check_call([sys.executable, '-m', 'pip', 'install', 'requests'])
+            import requests
+
+        session = requests.Session()
+        # Modern direct-download URL — bypasses HTML warning page on large files
+        direct_url = (
+            f"https://drive.usercontent.google.com/download"
+            f"?id={file_id}&export=download&authuser=0&confirm=t"
+        )
+
+        print(f"[UPDATE] Starting download from Google Drive...")
+        response = session.get(direct_url, stream=True, timeout=60)
+        response.raise_for_status()
+
+        # Sanity-check: make sure we got binary data, not an error HTML page
+        content_type = response.headers.get('Content-Type', '')
+        if 'text/html' in content_type:
+            snippet = response.text[:300]
+            raise Exception(f"Drive returned an HTML page instead of the file. Response: {snippet}")
+
+        # Stream to disk in 8 MB chunks
+        total_written = 0
+        chunk_size = 8 * 1024 * 1024
+        with open(save_path, 'wb') as f:
+            for chunk in response.iter_content(chunk_size=chunk_size):
+                if chunk:
+                    f.write(chunk)
+                    total_written += len(chunk)
+                    print(f"[UPDATE] Downloaded {total_written / (1024*1024):.1f} MB...", end='\r')
+
+        print()  # newline after progress line
+        if total_written == 0:
+            raise Exception("Downloaded file is empty — Drive may have returned an error")
+        
+        # Verify download
+        actual_size = os.path.getsize(save_path)
+        print(f"[UPDATE] Downloaded size: {actual_size / (1024*1024):.1f} MB")
+        
+        if actual_size < 100000:  # Less than 100KB is suspicious for an EXE
+            with open(save_path, 'rb') as f:
+                header = f.read(500)
+            if b'<html' in header.lower() or b'<!doctype' in header.lower():
+                os.remove(save_path)
+                raise Exception("Download returned HTML instead of the EXE file")
+        
+        print(f"[UPDATE] Download complete: {save_path}")
+        
+        return {
+            'success': True,
+            'path': save_path,
+            'filename': filename
+        }
+    except Exception as e:
+        print(f"[UPDATE] Download failed: {e}")
+        return {
+            'success': False,
+            'error': str(e)
+        }
+
+
+@eel.expose
+def open_file_location(file_path):
+    """Open the folder containing the downloaded file in Explorer"""
+    import subprocess as sp
+    try:
+        # Open Explorer with the file selected
+        sp.Popen(f'explorer /select,"{file_path}"')
+        return True
+    except Exception as e:
+        print(f"[ERROR] Failed to open file location: {e}")
+        return False
 
 
 # Start the application
@@ -2736,6 +3680,14 @@ if __name__ == '__main__':
     ensure_csv_exists(COVENANTS_FILE, COVENANT_HEADERS)
     ensure_csv_exists(ADVANCES_FILE, ADVANCE_HEADERS)
     ensure_csv_exists(LEDGER_LOG_FILE, LEDGER_LOG_HEADERS)
+    
+    # Initialize per-module transaction files
+    ensure_csv_exists(STOCK_TRANSACTIONS_FILE, STOCK_TRANSACTION_HEADERS)
+    for ledger_type, file_path in LEDGER_TRANSACTION_FILES.items():
+        ensure_csv_exists(file_path, LEDGER_TRANSACTION_HEADERS)
+    
+    # Run CSV schema migrations (adds new columns to existing files)
+    run_migrations()
     
     print("Starting Warehouse Stock Logging App...")
     print(f"Data stored in: {DATA_PATH}")

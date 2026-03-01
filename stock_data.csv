@@ -1,2 +1,0 @@
-id,name,category,unit,location,supplier,starting_balance,total_incoming,total_outgoing,net_stock,unit_price,min_stock,last_updated
-ITEM-001,hyhbh,raw_materials,boxes,station|production_line_3,gtyh,5678.0,0.0,5670.0,8.0,6.0,65.0,26/01/2026
