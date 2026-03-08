@@ -1,0 +1,71 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: mbstring, sqlite3, pdo_sqlite, zip
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install PHP dependencies
+        run: composer install --no-dev --optimize-autoloader
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Build frontend assets
+        run: npm run build
+
+      - name: Setup environment
+        run: |
+          copy .env.example .env
+          php artisan key:generate
+        shell: cmd
+
+      - name: Configure NativePHP updater
+        run: |
+          echo NATIVEPHP_UPDATER_ENABLED=true >> .env
+          echo NATIVEPHP_UPDATER_PROVIDER=github >> .env
+          echo GITHUB_REPO=ERP >> .env
+          echo GITHUB_OWNER=SacreddPotato >> .env
+          echo NATIVEPHP_APP_VERSION=${{ github.ref_name }} >> .env
+        shell: bash
+
+      - name: Write Firebase credentials
+        run: |
+          echo '${{ secrets.FIREBASE_CREDENTIALS }}' > firebase-service-account.json
+        shell: bash
+
+      - name: Build NativePHP Electron app
+        run: php artisan native:build win
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: enterprisflow-windows
+          path: dist/*.exe
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.exe
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,0 +1,85 @@
+<?php
+
+namespace App\Http\Controllers\Api;
+
+use App\Enums\LedgerType;
+use App\Http\Controllers\Controller;
+use App\Services\LedgerService;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+
+class LedgerController extends Controller
+{
+    public function __construct(protected LedgerService $service) {}
+
+    public function index(Request $request, string $type): JsonResponse
+    {
+        $ledgerType = LedgerType::from($type);
+        $entities = $this->service->getAll($ledgerType, $request->only(['search', 'payment_method', 'document_number', 'statement']));
+        $totals = $this->service->getTotalBalance($ledgerType);
+        return response()->json(['entities' => $entities, 'totals' => $totals]);
+    }
+
+    public function generateCode(string $type): JsonResponse
+    {
+        $ledgerType = LedgerType::from($type);
+        return response()->json(['code' => $this->service->generateNextCode($ledgerType)]);
+    }
+
+    public function checkCode(Request $request, string $type): JsonResponse
+    {
+        $ledgerType = LedgerType::from($type);
+        $entity = $this->service->checkExists($ledgerType, $request->input('code'));
+        return response()->json(['exists' => !!$entity, 'entity' => $entity]);
+    }
+
+    public function store(Request $request, string $type): JsonResponse
+    {
+        try {
+            $ledgerType = LedgerType::from($type);
+            $entity = $this->service->addOrUpdate($ledgerType, $request->all());
+            return response()->json(['success' => true, 'entity' => $entity]);
+        } catch (\Throwable $e) {
+            return response()->json(['success' => false, 'message' => $e->getMessage()], 422);
+        }
+    }
+
+    public function update(Request $request, string $type): JsonResponse
+    {
+        try {
+            $ledgerType = LedgerType::from($type);
+            $entity = $this->service->editEntity($ledgerType, $request->input('code'), $request->except(['code']));
+            return response()->json(['success' => true, 'entity' => $entity]);
+        } catch (\Throwable $e) {
+            return response()->json(['success' => false, 'message' => $e->getMessage()], 422);
+        }
+    }
+
+    public function destroy(Request $request, string $type): JsonResponse
+    {
+        try {
+            $ledgerType = LedgerType::from($type);
+            $this->service->deleteEntity($ledgerType, $request->input('code'), $request->input('password'));
+            return response()->json(['success' => true]);
+        } catch (\Throwable $e) {
+            return response()->json(['success' => false, 'message' => $e->getMessage()], 422);
+        }
+    }
+
+    public function transactions(Request $request, string $type): JsonResponse
+    {
+        $ledgerType = LedgerType::from($type);
+        $transactions = $this->service->getEntityTransactions($request->input('code'), $ledgerType);
+        return response()->json($transactions);
+    }
+
+    public function reverseTransaction(Request $request): JsonResponse
+    {
+        try {
+            $this->service->reverseTransaction($request->input('id'));
+            return response()->json(['success' => true, 'message' => __('reverse_success')]);
+        } catch (\Throwable $e) {
+            return response()->json(['success' => false, 'message' => $e->getMessage()], 422);
+        }
+    }
+}
