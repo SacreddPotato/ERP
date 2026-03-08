@@ -19,7 +19,7 @@ jobs:
         uses: shivammathur/setup-php@v2
         with:
           php-version: '8.3'
-          extensions: mbstring, sqlite3, pdo_sqlite, zip, sodium, fileinfo
+          extensions: mbstring, sqlite3, pdo_sqlite, zip, sodium, fileinfo, grpc
 
       - name: Setup Node.js
         uses: actions/setup-node@v4

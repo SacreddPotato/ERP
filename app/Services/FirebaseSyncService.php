@@ -28,7 +28,10 @@ class FirebaseSyncService
     {
         $factory = (new FirebaseFactory)
             ->withServiceAccount(config('firebase.credentials'))
-            ->withProjectId(config('firebase.project_id'));
+            ->withProjectId(config('firebase.project_id'))
+            ->withFirestoreClientConfig([
+                'transport' => extension_loaded('grpc') ? 'grpc' : 'rest',
+            ]);
 
         $this->firestore = $factory->createFirestore();
     }
