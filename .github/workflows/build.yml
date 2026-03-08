@@ -60,15 +60,8 @@ jobs:
         shell: bash
 
       - name: Validate Firebase credentials
-        run: |
-          php -r "
-            \$json = json_decode(file_get_contents('firebase-service-account.json'), true);
-            if (!is_array(\$json) || empty(\$json['client_email'])) {
-              echo 'ERROR: Firebase credentials file is missing or invalid (no client_email)' . PHP_EOL;
-              exit(1);
-            }
-            echo 'OK: client_email = ' . \$json['client_email'] . PHP_EOL;
-          "
+        shell: bash
+        run: php -r "$json=json_decode(file_get_contents('firebase-service-account.json'),true);if(!is_array($json)||empty($json['client_email'])){echo 'ERROR: invalid credentials'.PHP_EOL;exit(1);}echo 'OK: '.$json['client_email'].PHP_EOL;"
 
       - name: Build NativePHP Electron app
         run: php artisan native:build win
