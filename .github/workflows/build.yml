@@ -50,6 +50,7 @@ jobs:
           echo GITHUB_REPO=ERP >> .env
           echo GITHUB_OWNER=SacreddPotato >> .env
           echo GITHUB_RELEASE_TYPE=release >> .env
+          echo GITHUB_TOKEN=${{ github.token }} >> .env
           echo NATIVEPHP_APP_VERSION=${{ github.ref_name }} >> .env
         shell: bash
 
@@ -63,7 +64,7 @@ jobs:
         run: php .github/validate-firebase.php
 
       - name: Build NativePHP Electron app
-        run: php artisan native:build win
+        run: php artisan native:build win --publish
 
       - name: Package build output
         run: |
