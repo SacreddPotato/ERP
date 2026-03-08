@@ -51,7 +51,8 @@ jobs:
           echo GITHUB_OWNER=SacreddPotato >> .env
           echo GITHUB_RELEASE_TYPE=release >> .env
           echo GITHUB_TOKEN=${{ github.token }} >> .env
-          echo NATIVEPHP_APP_VERSION=${{ github.ref_name }} >> .env
+          VERSION=${GITHUB_REF_NAME#v}
+          echo NATIVEPHP_APP_VERSION=$VERSION >> .env
         shell: bash
 
       - name: Write Firebase credentials
@@ -89,12 +90,8 @@ jobs:
             dist/latest.yml
             dist/EnterprisFlow-*-win-x64.zip
 
-      - name: Create GitHub Release
+      - name: Update GitHub Release with zip
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            dist/EnterprisFlow-*-setup.exe
-            dist/EnterprisFlow-*-setup.exe.blockmap
-            dist/latest.yml
-            dist/EnterprisFlow-*-win-x64.zip
+          files: dist/EnterprisFlow-*-win-x64.zip
           generate_release_notes: true

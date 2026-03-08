@@ -7,12 +7,16 @@ export interface ColumnDef {
     label: string;
     /** Format value for print display. For Excel, raw values are used. */
     render?: (value: any, row: any) => string;
+    /** If true, this column will be summed in the totals row. */
+    summable?: boolean;
 }
 
 interface ExportPrintModalProps {
     open: boolean;
     onClose: () => void;
     title: string;
+    /** Optional subtitle displayed below the title (e.g. entity code + name). */
+    subtitle?: string;
     columns: ColumnDef[];
     data: any[];
     filename: string;
@@ -27,7 +31,7 @@ function escapeHtml(str: string): string {
         .replace(/"/g, '&quot;');
 }
 
-export function ExportPrintModal({ open, onClose, title, columns, data, filename, t }: ExportPrintModalProps) {
+export function ExportPrintModal({ open, onClose, title, subtitle, columns, data, filename, t }: ExportPrintModalProps) {
     const [selected, setSelected] = useState<Set<string>>(new Set());
 
     useEffect(() => {
@@ -61,13 +65,26 @@ export function ExportPrintModal({ open, onClose, title, columns, data, filename
         return String(val);
     };
 
+    const computeTotals = (cols: ColumnDef[]) => {
+        if (!cols.some(c => c.summable)) return null;
+        const sums: Record<string, number> = {};
+        cols.forEach(c => { if (c.summable) sums[c.key] = 0; });
+        data.forEach(row => {
+            cols.forEach(c => {
+                if (c.summable) sums[c.key] += Number(row[c.key]) || 0;
+            });
+        });
+        return sums;
+    };
+
     const exportExcel = () => {
         const cols = getSelectedColumns();
         if (cols.length === 0) return;
+        const sums = computeTotals(cols);
 
         let html = '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel">';
         html += '<head><meta charset="utf-8">';
-        html += '<style>td,th{border:1px solid #ccc;padding:4px 8px;font-family:Arial;font-size:12px}th{background:#f0f0f0;font-weight:bold}</style>';
+        html += '<style>td,th{border:1px solid #ccc;padding:4px 8px;font-family:Arial;font-size:12px}th{background:#f0f0f0;font-weight:bold}.total{background:#e8e8e8;font-weight:bold}</style>';
         html += '</head><body><table>';
         html += '<tr>' + cols.map(c => `<th>${escapeHtml(c.label)}</th>`).join('') + '</tr>';
         data.forEach(row => {
@@ -82,6 +99,19 @@ export function ExportPrintModal({ open, onClose, title, columns, data, filename
             });
             html += '</tr>';
         });
+        if (sums) {
+            html += '<tr class="total">';
+            cols.forEach((col, i) => {
+                if (col.summable && sums[col.key] !== undefined) {
+                    html += `<td class="total" style="mso-number-format:'\\#\\,\\#\\#0\\.00'">${sums[col.key]}</td>`;
+                } else if (i === 0) {
+                    html += `<td class="total">${escapeHtml(t('total_label'))}</td>`;
+                } else {
+                    html += '<td class="total"></td>';
+                }
+            });
+            html += '</tr>';
+        }
         html += '</table></body></html>';
 
         const blob = new Blob(['\ufeff' + html], { type: 'application/vnd.ms-excel;charset=utf-8' });
@@ -97,6 +127,7 @@ export function ExportPrintModal({ open, onClose, title, columns, data, filename
     const printTable = () => {
         const cols = getSelectedColumns();
         if (cols.length === 0) return;
+        const sums = computeTotals(cols);
 
         const printWindow = window.open('', '_blank');
         if (!printWindow) return;
@@ -106,14 +137,17 @@ export function ExportPrintModal({ open, onClose, title, columns, data, filename
         html += '<style>';
         html += 'body{font-family:Arial,sans-serif;margin:20px;direction:ltr}';
         html += 'h2{margin-bottom:4px;font-size:18px}';
+        html += '.subtitle{font-size:13px;color:#444;margin-bottom:2px}';
         html += '.meta{font-size:11px;color:#666;margin-bottom:12px}';
         html += 'table{width:100%;border-collapse:collapse}';
         html += 'th,td{border:1px solid #333;padding:6px 10px;font-size:12px;text-align:left}';
         html += 'th{background:#f0f0f0;font-weight:bold}';
         html += 'tr:nth-child(even){background:#fafafa}';
+        html += '.total-row td{background:#e8e8e8;font-weight:bold;border-top:2px solid #333}';
         html += '@media print{body{margin:10px}h2{font-size:14px}}';
         html += '</style></head><body>';
         html += `<h2>${escapeHtml(title)}</h2>`;
+        if (subtitle) html += `<p class="subtitle">${escapeHtml(subtitle)}</p>`;
         html += `<p class="meta">${data.length} rows &mdash; ${new Date().toLocaleDateString()}</p>`;
         html += '<table><thead><tr>';
         cols.forEach(c => { html += `<th>${escapeHtml(c.label)}</th>`; });
@@ -123,6 +157,20 @@ export function ExportPrintModal({ open, onClose, title, columns, data, filename
             cols.forEach(c => { html += `<td>${escapeHtml(getDisplayValue(c, row))}</td>`; });
             html += '</tr>';
         });
+        if (sums) {
+            html += '<tr class="total-row">';
+            cols.forEach((col, i) => {
+                if (col.summable && sums[col.key] !== undefined) {
+                    const displayVal = col.render ? col.render(sums[col.key], {}) : String(sums[col.key]);
+                    html += `<td>${escapeHtml(displayVal)}</td>`;
+                } else if (i === 0) {
+                    html += `<td>${escapeHtml(t('total_label'))}</td>`;
+                } else {
+                    html += '<td></td>';
+                }
+            });
+            html += '</tr>';
+        }
         html += '</tbody></table></body></html>';
 
         printWindow.document.write(html);

@@ -393,6 +393,7 @@
     "deselect_all": "Deselect All",
     "btn_export_selected": "Export Selected",
     "btn_export_excel": "Export Excel",
+    "total_label": "Total",
 
     "search_mode_and": "AND",
     "search_mode_or": "OR",

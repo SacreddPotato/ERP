@@ -9,7 +9,7 @@ import { Modal } from '../ui/Modal';
 import { toast } from '../ui/Toast';
 import { ExportPrintModal, ColumnDef } from '../ui/ExportPrintModal';
 import api from '../../lib/api';
-import { fmtNum, fmtDate, fmtDateTime, escapeHtml } from '../../lib/format';
+import { fmtNum, fmtDate, fmtDateTime } from '../../lib/format';
 import { LedgerEntity, LedgerTotals, LedgerLog, PAYMENT_METHODS } from '../../types';
 
 interface LedgerPageProps {
@@ -75,6 +75,8 @@ export default function LedgerPage({ type }: LedgerPageProps) {
 
     // Export modal
     const [showExport, setShowExport] = useState(false);
+    // Per-entity tx export modal
+    const [txExport, setTxExport] = useState<{ code: string; name: string; data: LedgerLog[] } | null>(null);
 
     // Edit modal
     const [editTarget, setEditTarget] = useState<LedgerEntity | null>(null);
@@ -231,33 +233,22 @@ export default function LedgerPage({ type }: LedgerPageProps) {
         { key: cfg.codeColumn, label: t('th_id') },
         { key: cfg.nameColumn, label: t('th_name') },
         ...(cfg.hasPhone ? [{ key: 'phone', label: t('th_phone'), render: (v: any) => v || '' } as ColumnDef] : []),
-        { key: 'opening_balance', label: t('th_opening_balance'), render: (v: any) => fmtNum(v) },
-        { key: 'debit', label: t('th_debit'), render: (v: any) => fmtNum(v) },
-        { key: 'credit', label: t('th_credit'), render: (v: any) => fmtNum(v) },
-        { key: 'balance', label: t('th_balance'), render: (v: any) => fmtNum(v) },
+        { key: 'opening_balance', label: t('th_opening_balance'), render: (v: any) => fmtNum(v), summable: true },
+        { key: 'debit', label: t('th_debit'), render: (v: any) => fmtNum(v), summable: true },
+        { key: 'credit', label: t('th_credit'), render: (v: any) => fmtNum(v), summable: true },
+        { key: 'balance', label: t('th_balance'), render: (v: any) => fmtNum(v), summable: true },
     ];
 
-    const printEntityTx = (code: string, name: string, txData: LedgerLog[]) => {
-        const w = window.open('', '_blank');
-        if (!w) return;
-        let h = '<!DOCTYPE html><html><head><meta charset="utf-8">';
-        h += `<title>${escapeHtml(code)} - ${escapeHtml(name)}</title>`;
-        h += '<style>body{font-family:Arial,sans-serif;margin:20px}h2{margin-bottom:4px;font-size:18px}.meta{font-size:12px;color:#666;margin-bottom:12px}table{width:100%;border-collapse:collapse}th,td{border:1px solid #333;padding:6px 10px;font-size:12px;text-align:left}th{background:#f0f0f0;font-weight:bold}tr:nth-child(even){background:#fafafa}@media print{body{margin:10px}}</style>';
-        h += '</head><body>';
-        h += `<h2>${escapeHtml(code)} &mdash; ${escapeHtml(name)}</h2>`;
-        h += `<p class="meta">${txData.length} ${t('showing_transactions').replace(':count', String(txData.length)).replace(t('showing_transactions').split(':count')[0], '').trim() || 'transactions'} &mdash; ${new Date().toLocaleDateString()}</p>`;
-        h += '<table><thead><tr>';
-        [t('th_trans_date'), t('th_logged_at'), t('th_type'), t('th_debit'), t('th_credit'), t('th_balance'), t('th_payment_method'), t('th_statement')].forEach(label => { h += `<th>${escapeHtml(label)}</th>`; });
-        h += '</tr></thead><tbody>';
-        txData.forEach(tx => {
-            h += `<tr><td>${fmtDate(tx.transaction_date)}</td><td>${fmtDateTime(tx.logged_at)}</td><td>${escapeHtml(tx.transaction_type || '')}</td><td>${fmtNum(tx.debit)}</td><td>${fmtNum(tx.credit)}</td><td>${fmtNum(tx.new_balance)}</td><td>${tx.payment_method ? escapeHtml(t(`payment_${tx.payment_method}`)) : '-'}</td><td>${escapeHtml(tx.statement || '-')}</td></tr>`;
-        });
-        h += '</tbody></table></body></html>';
-        w.document.write(h);
-        w.document.close();
-        w.focus();
-        setTimeout(() => w.print(), 250);
-    };
+    const txExportColumns: ColumnDef[] = [
+        { key: 'transaction_date', label: t('th_trans_date'), render: (v: any) => fmtDate(v) },
+        { key: 'logged_at', label: t('th_logged_at'), render: (v: any) => fmtDateTime(v) },
+        { key: 'transaction_type', label: t('th_type'), render: (v: any) => v || '' },
+        { key: 'debit', label: t('th_debit'), render: (v: any) => fmtNum(v), summable: true },
+        { key: 'credit', label: t('th_credit'), render: (v: any) => fmtNum(v), summable: true },
+        { key: 'new_balance', label: t('th_balance'), render: (v: any) => fmtNum(v) },
+        { key: 'payment_method', label: t('th_payment_method'), render: (v: any, row: any) => v ? t(`payment_${v}`) : '-' },
+        { key: 'statement', label: t('th_statement'), render: (v: any) => v || '-' },
+    ];
 
     const TxSortHeader = ({ col, children }: { col: string; children: React.ReactNode }) => (
         <th
@@ -454,7 +445,7 @@ export default function LedgerPage({ type }: LedgerPageProps) {
                                                         )}
                                                         {!txLoading && sortedTransactions.length > 0 && (
                                                             <div className="px-3 py-2 border-t border-slate-200 dark:border-slate-600 flex justify-end bg-slate-50/50 dark:bg-slate-700/30">
-                                                                <Button size="xs" variant="ghost" onClick={() => printEntityTx(entityCode, entityDisplayName, sortedTransactions)}>
+                                                                <Button size="xs" variant="ghost" onClick={() => setTxExport({ code: entityCode, name: entityDisplayName, data: sortedTransactions })}>
                                                                     <svg className="w-3.5 h-3.5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                                                         <path strokeLinecap="round" strokeLinejoin="round" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
                                                                     </svg>
@@ -491,6 +482,19 @@ export default function LedgerPage({ type }: LedgerPageProps) {
                 filename={`ledger_${type}`}
                 t={t}
             />
+
+            {txExport && (
+                <ExportPrintModal
+                    open={true}
+                    onClose={() => setTxExport(null)}
+                    title={t(cfg.listKey)}
+                    subtitle={`${txExport.code} — ${txExport.name}`}
+                    columns={txExportColumns}
+                    data={txExport.data}
+                    filename={`${type}_${txExport.code}_transactions`}
+                    t={t}
+                />
+            )}
 
             {/* Edit Modal */}
             <Modal open={!!editTarget} onClose={() => setEditTarget(null)} title={t('btn_edit')}>
