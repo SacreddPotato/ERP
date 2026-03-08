@@ -48,6 +48,7 @@ jobs:
           echo NATIVEPHP_UPDATER_PROVIDER=github >> .env
           echo GITHUB_REPO=ERP >> .env
           echo GITHUB_OWNER=SacreddPotato >> .env
+          echo GITHUB_RELEASE_TYPE=release >> .env
           echo NATIVEPHP_APP_VERSION=${{ github.ref_name }} >> .env
         shell: bash
 
@@ -61,7 +62,15 @@ jobs:
 
       - name: Package build output
         run: |
-          Compress-Archive -Path dist\win-unpacked\* -DestinationPath dist\EnterprisFlow-${{ github.ref_name }}-win-x64.zip
+          if (Test-Path "dist\win-x64-unpacked") {
+            Compress-Archive -Path dist\win-x64-unpacked\* -DestinationPath dist\EnterprisFlow-${{ github.ref_name }}-win-x64.zip
+          } elseif (Test-Path "dist\win-unpacked") {
+            Compress-Archive -Path dist\win-unpacked\* -DestinationPath dist\EnterprisFlow-${{ github.ref_name }}-win-x64.zip
+          }
+        shell: pwsh
+
+      - name: List dist output for debugging
+        run: Get-ChildItem -Path dist -Recurse -File | Select-Object FullName, Length
         shell: pwsh
 
       - name: Upload build artifacts
@@ -69,13 +78,17 @@ jobs:
         with:
           name: enterprisflow-windows
           path: |
-            dist/win-unpacked/enterprisflow.exe
-            dist/EnterprisFlow-*.zip
+            dist/EnterprisFlow-*-setup.exe
+            dist/EnterprisFlow-*-setup.exe.blockmap
+            dist/latest.yml
+            dist/EnterprisFlow-*-win-x64.zip
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            dist/win-unpacked/enterprisflow.exe
-            dist/EnterprisFlow-*.zip
+            dist/EnterprisFlow-*-setup.exe
+            dist/EnterprisFlow-*-setup.exe.blockmap
+            dist/latest.yml
+            dist/EnterprisFlow-*-win-x64.zip
           generate_release_notes: true
