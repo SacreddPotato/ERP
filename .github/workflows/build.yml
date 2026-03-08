@@ -60,8 +60,7 @@ jobs:
         shell: bash
 
       - name: Validate Firebase credentials
-        shell: bash
-        run: php -r '$j=json_decode(file_get_contents("firebase-service-account.json"),true);if(!is_array($j)||empty($j["client_email"])){echo "ERROR: invalid credentials\n";exit(1);}echo "OK: ".$j["client_email"]."\n";'
+        run: php .github/validate-firebase.php
 
       - name: Build NativePHP Electron app
         run: php artisan native:build win
