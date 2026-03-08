@@ -69,13 +69,13 @@ jobs:
         with:
           name: enterprisflow-windows
           path: |
-            dist/win-unpacked/laravel.exe
+            dist/win-unpacked/enterprisflow.exe
             dist/EnterprisFlow-*.zip
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            dist/win-unpacked/laravel.exe
+            dist/win-unpacked/enterprisflow.exe
             dist/EnterprisFlow-*.zip
           generate_release_notes: true

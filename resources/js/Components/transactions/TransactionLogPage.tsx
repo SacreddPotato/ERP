@@ -16,8 +16,12 @@ export default function TransactionLogPage() {
     const [ledgerLogs, setLedgerLogs] = useState<LedgerLog[]>([]);
     const [loading, setLoading] = useState(false);
 
+    // Multi-tag search
+    const [tags, setTags] = useState<string[]>([]);
+    const [tagInput, setTagInput] = useState('');
+    const [searchMode, setSearchMode] = useState<'AND' | 'OR'>('OR');
+
     // Filters
-    const [keyword, setKeyword] = useState('');
     const [filterFactory, setFilterFactory] = useState('');
     const [filterType, setFilterType] = useState('');
     const [dateFrom, setDateFrom] = useState('');
@@ -27,17 +31,39 @@ export default function TransactionLogPage() {
     const [filterDocType, setFilterDocType] = useState('');
     const [filterDocNumber, setFilterDocNumber] = useState('');
 
+    // Sorting — default descending by logged_at
+    const [stockSortBy, setStockSortBy] = useState('logged_at');
+    const [stockSortDir, setStockSortDir] = useState<'asc' | 'desc'>('desc');
+    const [ledgerSortBy, setLedgerSortBy] = useState('logged_at');
+    const [ledgerSortDir, setLedgerSortDir] = useState<'asc' | 'desc'>('desc');
+
     // Reverse modal
     const [reverseTarget, setReverseTarget] = useState<{ id: number; source: 'stock' | 'ledger' } | null>(null);
+
+    const handleTagKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+        if (e.key === 'Enter' && tagInput.trim()) {
+            e.preventDefault();
+            const newTag = tagInput.trim();
+            if (!tags.includes(newTag)) {
+                setTags([...tags, newTag]);
+            }
+            setTagInput('');
+        }
+    };
+
+    const removeTag = (index: number) => {
+        setTags(tags.filter((_, i) => i !== index));
+    };
 
     const fetchLogs = useCallback(async () => {
         setLoading(true);
         try {
+            const keyword = tags.length > 0 ? tags.join(searchMode === 'AND' ? ' ' : '|') : undefined;
             if (logSource === 'stock') {
                 const res = await api.get('/api/transactions/stock', {
                     params: {
                         factory: filterFactory || undefined,
-                        keyword: keyword || undefined,
+                        keyword,
                         type: filterType || undefined,
                         date_from: dateFrom || undefined,
                         date_to: dateTo || undefined,
@@ -51,7 +77,7 @@ export default function TransactionLogPage() {
             } else {
                 const res = await api.get('/api/transactions/ledger', {
                     params: {
-                        keyword: keyword || undefined,
+                        keyword,
                         date_from: dateFrom || undefined,
                         date_to: dateTo || undefined,
                         trans_date_from: transDateFrom || undefined,
@@ -62,9 +88,79 @@ export default function TransactionLogPage() {
             }
         } catch { toast(t('sync_failed'), 'error'); }
         setLoading(false);
-    }, [logSource, keyword, filterFactory, filterType, dateFrom, dateTo, transDateFrom, transDateTo, filterDocType, filterDocNumber, t]);
+    }, [logSource, tags, searchMode, filterFactory, filterType, dateFrom, dateTo, transDateFrom, transDateTo, filterDocType, filterDocNumber, t]);
 
     useEffect(() => { fetchLogs(); }, [fetchLogs]);
+
+    // Client-side tag filtering (AND/OR on all searchable text fields)
+    const matchesTags = useCallback((searchableText: string): boolean => {
+        if (tags.length === 0) return true;
+        const lower = searchableText.toLowerCase();
+        if (searchMode === 'AND') {
+            return tags.every(tag => lower.includes(tag.toLowerCase()));
+        } else {
+            return tags.some(tag => lower.includes(tag.toLowerCase()));
+        }
+    }, [tags, searchMode]);
+
+    const getStockSearchableText = (log: TransactionLog) =>
+        [log.item_code, log.item_name, log.transaction_type, log.factory, log.notes, log.supplier, log.document_number].filter(Boolean).join(' ');
+
+    const getLedgerSearchableText = (log: LedgerLog) =>
+        [log.entity_code, log.entity_name, log.ledger_type, log.transaction_type, log.statement, log.document_number].filter(Boolean).join(' ');
+
+    // Sorting logic
+    const compareValues = (aVal: any, bVal: any, dir: 'asc' | 'desc') => {
+        if (aVal == null && bVal == null) return 0;
+        if (aVal == null) return dir === 'asc' ? -1 : 1;
+        if (bVal == null) return dir === 'asc' ? 1 : -1;
+        const cmp = typeof aVal === 'number' && typeof bVal === 'number'
+            ? aVal - bVal
+            : String(aVal).localeCompare(String(bVal));
+        return dir === 'asc' ? cmp : -cmp;
+    };
+
+    const filteredStockLogs = stockLogs
+        .filter(log => matchesTags(getStockSearchableText(log)))
+        .sort((a, b) => compareValues((a as any)[stockSortBy], (b as any)[stockSortBy], stockSortDir));
+
+    const filteredLedgerLogs = ledgerLogs
+        .filter(log => matchesTags(getLedgerSearchableText(log)))
+        .sort((a, b) => compareValues((a as any)[ledgerSortBy], (b as any)[ledgerSortBy], ledgerSortDir));
+
+    const toggleStockSort = (col: string) => {
+        if (stockSortBy === col) setStockSortDir(d => d === 'asc' ? 'desc' : 'asc');
+        else { setStockSortBy(col); setStockSortDir('asc'); }
+    };
+
+    const toggleLedgerSort = (col: string) => {
+        if (ledgerSortBy === col) setLedgerSortDir(d => d === 'asc' ? 'desc' : 'asc');
+        else { setLedgerSortBy(col); setLedgerSortDir('asc'); }
+    };
+
+    const StockSortHeader = ({ col, children }: { col: string; children: React.ReactNode }) => (
+        <th
+            onClick={() => toggleStockSort(col)}
+            className="px-4 py-3.5 text-start text-xs font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:text-gray-900 select-none whitespace-nowrap"
+        >
+            <span className="inline-flex items-center gap-1">
+                {children}
+                {stockSortBy === col && <span className="text-indigo-600">{stockSortDir === 'asc' ? '\u25B2' : '\u25BC'}</span>}
+            </span>
+        </th>
+    );
+
+    const LedgerSortHeader = ({ col, children }: { col: string; children: React.ReactNode }) => (
+        <th
+            onClick={() => toggleLedgerSort(col)}
+            className="px-4 py-3.5 text-start text-xs font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:text-gray-900 select-none whitespace-nowrap"
+        >
+            <span className="inline-flex items-center gap-1">
+                {children}
+                {ledgerSortBy === col && <span className="text-indigo-600">{ledgerSortDir === 'asc' ? '\u25B2' : '\u25BC'}</span>}
+            </span>
+        </th>
+    );
 
     const confirmReverse = async () => {
         if (!reverseTarget) return;
@@ -83,7 +179,7 @@ export default function TransactionLogPage() {
     };
 
     const clearFilters = () => {
-        setKeyword(''); setFilterFactory(''); setFilterType('');
+        setTags([]); setTagInput(''); setFilterFactory(''); setFilterType('');
         setDateFrom(''); setDateTo(''); setTransDateFrom(''); setTransDateTo('');
         setFilterDocType(''); setFilterDocNumber('');
     };
@@ -110,8 +206,70 @@ export default function TransactionLogPage() {
 
             {/* Filters */}
             <Card>
+                {/* Multi-tag search */}
+                <div className="mb-4">
+                    <label className="block text-sm font-medium text-gray-700 mb-1.5">{t('filter_keyword')}</label>
+                    <div className="flex items-center gap-3">
+                        <div className="flex-1 relative">
+                            <div className="flex flex-wrap items-center gap-1.5 min-h-[42px] px-3 py-2 border border-gray-200 rounded-xl bg-white focus-within:ring-2 focus-within:ring-indigo-500/20 focus-within:border-indigo-400 transition-all">
+                                {tags.map((tag, i) => (
+                                    <span
+                                        key={i}
+                                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-indigo-50 text-indigo-700 text-xs font-medium border border-indigo-100"
+                                    >
+                                        {tag}
+                                        <button
+                                            type="button"
+                                            onClick={() => removeTag(i)}
+                                            className="ml-0.5 text-indigo-400 hover:text-indigo-700 transition-colors"
+                                            aria-label={t('remove_tag')}
+                                        >
+                                            &times;
+                                        </button>
+                                    </span>
+                                ))}
+                                <input
+                                    type="text"
+                                    value={tagInput}
+                                    onChange={(e) => setTagInput(e.target.value)}
+                                    onKeyDown={handleTagKeyDown}
+                                    placeholder={tags.length === 0 ? t('placeholder_keyword_search') : ''}
+                                    className="flex-1 min-w-[120px] border-0 p-0 text-sm text-gray-700 placeholder-gray-400 focus:ring-0 focus:outline-none bg-transparent"
+                                />
+                            </div>
+                        </div>
+                        {/* AND/OR toggle */}
+                        <div className="flex items-center gap-1.5 shrink-0">
+                            <span className="text-xs text-gray-500 font-medium">{t('search_mode_label')}:</span>
+                            <div className="flex rounded-lg overflow-hidden border border-gray-200">
+                                <button
+                                    type="button"
+                                    onClick={() => setSearchMode('AND')}
+                                    className={`px-3 py-1.5 text-xs font-semibold transition-all ${
+                                        searchMode === 'AND'
+                                            ? 'bg-indigo-600 text-white'
+                                            : 'bg-white text-gray-600 hover:bg-gray-50'
+                                    }`}
+                                >
+                                    {t('search_mode_and')}
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setSearchMode('OR')}
+                                    className={`px-3 py-1.5 text-xs font-semibold transition-all ${
+                                        searchMode === 'OR'
+                                            ? 'bg-indigo-600 text-white'
+                                            : 'bg-white text-gray-600 hover:bg-gray-50'
+                                    }`}
+                                >
+                                    {t('search_mode_or')}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
-                    <Input placeholder={t('placeholder_keyword_search')} value={keyword} onChange={(e) => setKeyword(e.target.value)} label={t('filter_keyword')} />
                     {logSource === 'stock' && (
                         <Select label={t('filter_location')} options={factoryOptions} value={filterFactory} onChange={(e) => setFilterFactory(e.target.value)} />
                     )}
@@ -136,23 +294,23 @@ export default function TransactionLogPage() {
                         <table className="w-full">
                             <thead className="border-b border-gray-100">
                                 <tr>
-                                    <th className="px-4 py-3 text-start text-xs font-semibold text-gray-500 uppercase">{t('th_logged_at')}</th>
-                                    <th className="px-4 py-3 text-start text-xs font-semibold text-gray-500 uppercase">{t('th_trans_date')}</th>
-                                    <th className="px-4 py-3 text-start text-xs font-semibold text-gray-500 uppercase">{t('th_item_id')}</th>
-                                    <th className="px-4 py-3 text-start text-xs font-semibold text-gray-500 uppercase">{t('th_item_name')}</th>
-                                    <th className="px-4 py-3 text-start text-xs font-semibold text-gray-500 uppercase">{t('th_type')}</th>
-                                    <th className="px-4 py-3 text-start text-xs font-semibold text-gray-500 uppercase">{t('th_quantity')}</th>
-                                    <th className="px-4 py-3 text-start text-xs font-semibold text-gray-500 uppercase">{t('th_prev_stock')}</th>
-                                    <th className="px-4 py-3 text-start text-xs font-semibold text-gray-500 uppercase">{t('th_new_stock')}</th>
-                                    <th className="px-4 py-3 text-start text-xs font-semibold text-gray-500 uppercase">{t('th_location')}</th>
-                                    <th className="px-4 py-3 text-start text-xs font-semibold text-gray-500 uppercase">{t('th_notes')}</th>
-                                    <th className="px-4 py-3 text-start text-xs font-semibold text-gray-500 uppercase">{t('th_actions')}</th>
+                                    <StockSortHeader col="logged_at">{t('th_logged_at')}</StockSortHeader>
+                                    <StockSortHeader col="transaction_date">{t('th_trans_date')}</StockSortHeader>
+                                    <StockSortHeader col="item_code">{t('th_item_id')}</StockSortHeader>
+                                    <StockSortHeader col="item_name">{t('th_item_name')}</StockSortHeader>
+                                    <StockSortHeader col="transaction_type">{t('th_type')}</StockSortHeader>
+                                    <StockSortHeader col="quantity">{t('th_quantity')}</StockSortHeader>
+                                    <StockSortHeader col="previous_stock">{t('th_prev_stock')}</StockSortHeader>
+                                    <StockSortHeader col="new_stock">{t('th_new_stock')}</StockSortHeader>
+                                    <StockSortHeader col="factory">{t('th_location')}</StockSortHeader>
+                                    <StockSortHeader col="notes">{t('th_notes')}</StockSortHeader>
+                                    <th className="px-4 py-3.5 text-start text-xs font-semibold text-gray-500 uppercase tracking-wider">{t('th_actions')}</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-gray-50">
-                                {stockLogs.map((log) => (
+                                {filteredStockLogs.map((log) => (
                                     <tr key={log.id} className="hover:bg-gray-50/50 transition-colors">
-                                        <td className="px-4 py-3 text-xs text-gray-500 whitespace-nowrap">{log.logged_at?.split('T')[0]}</td>
+                                        <td className="px-4 py-3 text-xs text-gray-500 whitespace-nowrap">{log.logged_at?.replace('T', ' ').slice(0, 19)}</td>
                                         <td className="px-4 py-3 text-xs text-gray-500 whitespace-nowrap">{log.transaction_date || '-'}</td>
                                         <td className="px-4 py-3 text-sm font-medium text-indigo-600">{log.item_code}</td>
                                         <td className="px-4 py-3 text-sm text-gray-900">{log.item_name}</td>
@@ -171,13 +329,13 @@ export default function TransactionLogPage() {
                                 ))}
                             </tbody>
                         </table>
-                        {stockLogs.length === 0 && (
+                        {filteredStockLogs.length === 0 && (
                             <div className="text-center py-12 text-gray-400 text-sm">{t('no_transactions')}</div>
                         )}
                     </div>
-                    {stockLogs.length > 0 && (
+                    {filteredStockLogs.length > 0 && (
                         <div className="px-4 py-3 border-t border-gray-100 text-xs text-gray-500">
-                            {t('showing_transactions').replace(':count', String(stockLogs.length))}
+                            {t('showing_transactions').replace(':count', String(filteredStockLogs.length))}
                         </div>
                     )}
                 </Card>
@@ -190,22 +348,22 @@ export default function TransactionLogPage() {
                         <table className="w-full">
                             <thead className="border-b border-gray-100">
                                 <tr>
-                                    <th className="px-4 py-3 text-start text-xs font-semibold text-gray-500 uppercase">{t('th_logged_at')}</th>
-                                    <th className="px-4 py-3 text-start text-xs font-semibold text-gray-500 uppercase">{t('th_trans_date')}</th>
-                                    <th className="px-4 py-3 text-start text-xs font-semibold text-gray-500 uppercase">{t('th_type')}</th>
-                                    <th className="px-4 py-3 text-start text-xs font-semibold text-gray-500 uppercase">{t('th_id')}</th>
-                                    <th className="px-4 py-3 text-start text-xs font-semibold text-gray-500 uppercase">{t('th_name')}</th>
-                                    <th className="px-4 py-3 text-start text-xs font-semibold text-gray-500 uppercase">{t('th_debit')}</th>
-                                    <th className="px-4 py-3 text-start text-xs font-semibold text-gray-500 uppercase">{t('th_credit')}</th>
-                                    <th className="px-4 py-3 text-start text-xs font-semibold text-gray-500 uppercase">{t('th_balance')}</th>
-                                    <th className="px-4 py-3 text-start text-xs font-semibold text-gray-500 uppercase">{t('th_statement')}</th>
-                                    <th className="px-4 py-3 text-start text-xs font-semibold text-gray-500 uppercase">{t('th_actions')}</th>
+                                    <LedgerSortHeader col="logged_at">{t('th_logged_at')}</LedgerSortHeader>
+                                    <LedgerSortHeader col="transaction_date">{t('th_trans_date')}</LedgerSortHeader>
+                                    <LedgerSortHeader col="ledger_type">{t('th_type')}</LedgerSortHeader>
+                                    <LedgerSortHeader col="entity_code">{t('th_id')}</LedgerSortHeader>
+                                    <LedgerSortHeader col="entity_name">{t('th_name')}</LedgerSortHeader>
+                                    <LedgerSortHeader col="debit">{t('th_debit')}</LedgerSortHeader>
+                                    <LedgerSortHeader col="credit">{t('th_credit')}</LedgerSortHeader>
+                                    <LedgerSortHeader col="new_balance">{t('th_balance')}</LedgerSortHeader>
+                                    <LedgerSortHeader col="statement">{t('th_statement')}</LedgerSortHeader>
+                                    <th className="px-4 py-3.5 text-start text-xs font-semibold text-gray-500 uppercase tracking-wider">{t('th_actions')}</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-gray-50">
-                                {ledgerLogs.map((log) => (
+                                {filteredLedgerLogs.map((log) => (
                                     <tr key={log.id} className="hover:bg-gray-50/50 transition-colors">
-                                        <td className="px-4 py-3 text-xs text-gray-500 whitespace-nowrap">{log.logged_at?.split('T')[0]}</td>
+                                        <td className="px-4 py-3 text-xs text-gray-500 whitespace-nowrap">{log.logged_at?.replace('T', ' ').slice(0, 19)}</td>
                                         <td className="px-4 py-3 text-xs text-gray-500 whitespace-nowrap">{log.transaction_date || '-'}</td>
                                         <td className="px-4 py-3"><Badge variant="info">{log.ledger_type}</Badge></td>
                                         <td className="px-4 py-3 text-sm font-medium text-indigo-600">{log.entity_code}</td>
@@ -223,13 +381,13 @@ export default function TransactionLogPage() {
                                 ))}
                             </tbody>
                         </table>
-                        {ledgerLogs.length === 0 && (
+                        {filteredLedgerLogs.length === 0 && (
                             <div className="text-center py-12 text-gray-400 text-sm">{t('no_transactions')}</div>
                         )}
                     </div>
-                    {ledgerLogs.length > 0 && (
+                    {filteredLedgerLogs.length > 0 && (
                         <div className="px-4 py-3 border-t border-gray-100 text-xs text-gray-500">
-                            {t('showing_transactions').replace(':count', String(ledgerLogs.length))}
+                            {t('showing_transactions').replace(':count', String(filteredLedgerLogs.length))}
                         </div>
                     )}
                 </Card>

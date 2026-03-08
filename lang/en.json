@@ -385,6 +385,11 @@
     "deselect_all": "Deselect All",
     "btn_export_selected": "Export Selected",
 
+    "search_mode_and": "AND",
+    "search_mode_or": "OR",
+    "search_mode_label": "Match",
+    "remove_tag": "Remove",
+
     "language": "Language",
     "lang_en": "English",
     "lang_ar": "\u0627\u0644\u0639\u0631\u0628\u064a\u0629"

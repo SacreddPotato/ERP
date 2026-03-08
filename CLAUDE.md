@@ -4,68 +4,170 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**EnterprisFlow** is a warehouse stock and financial ledger management desktop app built with **Eel** (Python backend + HTML/CSS/JS frontend). It runs as a local desktop app using Edge/Chrome in app mode. Data is stored in CSV files locally (`%APPDATA%/WarehouseStockLogger/`) with optional Firebase Firestore cloud sync.
+**EnterprisFlow** is a warehouse stock, financial ledger, and treasury management desktop app built with **Laravel 12** (PHP 8.3+), **React 19** (TypeScript, Inertia.js), **Tailwind CSS v4**, and **NativePHP Electron** for desktop distribution. Data is stored in **SQLite** with optional **Firebase Firestore** cloud sync.
 
 ## Running the App
 
 ```bash
-python app.py
+# Development (Laravel + Vite)
+php artisan serve &
+npm run dev
+
+# Desktop mode (NativePHP Electron)
+php artisan native:serve
 ```
 
-Launches the Eel server and opens a browser window (Edge → Chrome → default fallback).
-
-## Building the Executable
+## Building
 
 ```bash
-python build_exe.py
+# Build frontend assets
+npm run build
+
+# Build Windows .exe via NativePHP
+php artisan native:build win
+# Output: dist/win-unpacked/laravel.exe
+
+# Type check
+npx tsc --noEmit
 ```
 
-Uses PyInstaller to create `dist/EnterprisFlow.exe`. The build script also uploads to Google Drive and updates Firebase version info. Dependencies: `pyinstaller`, `pillow`, `pydrive2`, `firebase-admin`.
+## CI/CD
 
-## Version Bumping
+- **`.github/workflows/ci.yml`** — Runs `php artisan test` + `npx tsc --noEmit` on push/PR
+- **`.github/workflows/tests.yml`** — PHP 8.3/8.4 test matrix
+- **`.github/workflows/build.yml`** — Builds Windows .exe on version tags (`v*`), creates GitHub Release with artifacts
 
-When releasing a new version, update **both**:
-1. `APP_VERSION` in `app.py` (line ~81)
-2. `version` field in `version.json`
+### Releasing a New Version
+
+```bash
+git tag v1.x.x
+git push origin v1.x.x
+```
+
+GitHub Actions builds the `.exe` and creates a release automatically.
 
 ## Architecture
 
-### Backend (`app.py` — single ~3800-line file)
-- All business logic lives in one file
-- Functions decorated with `@eel.expose` are callable from the JS frontend via `eel.function_name()()`
-- CSV read/write operations use a thread `Lock` (`file_lock`) for concurrency safety
-- Helper functions: `read_csv()`, `write_csv()`, `append_csv()`, `ensure_csv_exists()`, `migrate_csv_headers()`
-- On startup, `run_migrations()` adds new columns to existing CSV files without data loss
+### Backend (Laravel)
 
-### Frontend (`web/`)
-- `web/index.html` — Single-page app with tab-based navigation
-- `web/js/app.js` (~6300 lines) — All UI logic, calls Python backend via `eel.function_name()()`
-- `web/js/firebase-sync.js` — Push/pull/force-pull sync with Firestore (no auth, shared database)
-- `web/js/firebase-config.js` — Firebase project configuration
-- `web/js/auto-update.js` — Version checking against Firebase, update notifications
-- `web/js/i18n.js` — Bilingual support (English/Arabic) with RTL layout switching
-- `web/css/styles.css` — All styling
+```
+app/
+├── Http/Controllers/Api/   # REST API controllers
+│   ├── StockController.php
+│   ├── LedgerController.php
+│   ├── TreasuryController.php
+│   ├── TransactionLogController.php
+│   ├── SyncController.php
+│   └── SettingsController.php
+├── Services/               # Business logic layer
+│   ├── StockService.php
+│   ├── LedgerService.php
+│   ├── TreasuryService.php
+│   ├── FirebaseSyncService.php
+│   └── TransactionLogger.php
+├── Models/                 # Eloquent models (SQLite)
+│   ├── StockItem.php, StockTransaction.php
+│   ├── Customer.php, Supplier.php, Covenant.php, Advance.php
+│   ├── TreasuryAccount.php, TreasuryConfig.php
+│   ├── TransactionLog.php, LedgerLog.php, LedgerTransaction.php
+│   └── ...
+├── Enums/                  # Category, Factory, Unit, TransactionType, etc.
+└── Providers/
+    └── NativeAppServiceProvider.php  # NativePHP config
+```
 
-### Data Model
-All data stored as CSV files in `%APPDATA%/WarehouseStockLogger/`:
+API routes are defined in `routes/web.php` under `/api/*` prefix.
 
-- **Stock**: Per-factory CSV files (`stock_bahbit.csv`, `stock_old_factory.csv`, `stock_station.csv`, `stock_thaabaneya.csv`)
-- **Ledgers**: `customers_ledger.csv`, `suppliers_ledger.csv`, `treasury_ledger.csv`, `covenants_ledger.csv`, `advances_ledger.csv`
-- **Transaction logs**: `transactions_log.csv` (full log with edits/deletes), `stock_transactions.csv` (operations only), plus per-module transaction files (`customer_transactions.csv`, etc.)
-- **Ledger log**: `ledger_transactions_log.csv` — combined log across all ledger modules
+### Frontend (React + Inertia.js)
 
-### Modules (tabs in the UI)
-- **Stock Management** — Add/update items, incoming/outgoing transactions, internal transfers between factories
-- **Customers** — Customer ledger with debit/credit tracking
-- **Suppliers** — Supplier ledger with debit/credit tracking
-- **Treasury** — Account management with initialization, starting capital, debit/credit
-- **Covenants** — Employee covenant tracking
-- **Advances** — Employee advance tracking
-- **Transaction Log** — Combined view of stock and ledger transaction histories
+```
+resources/js/
+├── Pages/Dashboard.tsx          # Main 8-tab dashboard (entry point)
+├── Components/
+│   ├── ui/                      # Design system (Card, Button, Input, Modal, Badge, Toast, StatCard, Select, Textarea)
+│   ├── stock/
+│   │   ├── StockManager.tsx     # Add/update items, transactions form
+│   │   └── StockTable.tsx       # Stock inventory table with sortable columns
+│   ├── ledger/
+│   │   └── LedgerPage.tsx       # Shared component for Customer/Supplier/Covenant/Advance ledgers
+│   ├── treasury/
+│   │   └── TreasuryPage.tsx     # Treasury init, accounts, transactions
+│   ├── transactions/
+│   │   └── TransactionLogPage.tsx  # Combined stock + ledger transaction log viewer
+│   └── sync/
+│       └── FirebaseSyncPanel.tsx   # Firebase push/pull/force-pull
+├── Layouts/
+│   └── AppLayout.tsx            # Global header, factory selector, locale toggle, footer
+├── contexts/
+│   └── AppContext.tsx            # Global state: locale, factory, translations, RTL
+├── i18n/
+│   └── index.ts                 # i18next setup
+├── lib/
+│   └── api.ts                   # Axios instance with CSRF
+└── types/
+    └── index.ts                 # TypeScript interfaces (StockItem, LedgerEntity, TransactionLog, LedgerLog, etc.)
+```
 
-### Key Patterns
-- Factory context: The app operates in a selected factory context (`currentFactory`). Stock operations are scoped to the active factory.
-- Transaction types use Arabic strings (e.g., `'وارد'` for incoming, `'صادر'` for outgoing)
-- Delete operations require password authentication (`DELETE_PASSWORD` in `app.py`)
-- Firebase sync is manual (push/pull buttons), not automatic, to reduce Firestore reads
-- The `i18n.js` module uses `data-i18n` attributes on HTML elements for translation
+### Translations
+
+Translations live in `lang/en.json` and `lang/ar.json`. They are key-value JSON files loaded server-side and passed to the frontend via Inertia page props. The `t()` function from `AppContext` does simple key lookup with `:param` interpolation.
+
+### Database
+
+SQLite via Eloquent. Migrations are in `database/migrations/`. Key tables:
+- `stock_items`, `stock_transactions` — inventory per factory
+- `customers`, `suppliers`, `covenants`, `advances` — ledger entities
+- `transaction_logs` — stock operation history
+- `ledger_logs`, `ledger_transactions` — ledger operation history
+- `treasury_accounts`, `treasury_configs` — treasury management
+
+## Key Patterns
+
+### Factory Context
+The app operates in a selected factory context (bahbit, old_factory, station, thaabaneya). Stock operations are scoped to the active factory. The factory selector is in `AppLayout.tsx` header.
+
+### Sortable Tables
+Tables use a `SortHeader` component pattern with `sortBy`/`sortDir` state. Click a column header to sort; click again to toggle direction. Default sort for transaction tables is `logged_at` descending (newest first). This pattern exists in:
+- `StockTable.tsx` — main stock table
+- `TransactionLogPage.tsx` — stock and ledger transaction log tables (separate sort state for each)
+- `LedgerPage.tsx` — expandable transaction sub-tables
+- `TreasuryPage.tsx` — expandable transaction sub-tables
+
+### Multi-Tag Search (TransactionLogPage)
+The transaction log has a tag-based search system: type a keyword, press Enter to add it as a chip. Multiple tags can be active. An AND/OR toggle controls whether all tags must match (AND) or any tag matches (OR). Tags filter client-side across all text fields in each row.
+
+### Expandable Transaction Rows
+In LedgerPage and TreasuryPage, each entity row has a "Transactions" button that expands an inline sub-table showing that entity's transaction history. The sub-table has its own independent sort state (default: `logged_at` desc).
+
+### Bilingual (EN/AR)
+Full English and Arabic support with automatic RTL layout switching. Toggle in the header. Translation keys are in `lang/en.json` and `lang/ar.json`.
+
+### Firebase Cloud Sync
+Manual push/pull/force-pull synchronization with Firestore. No automatic sync. Config via `.env` (`FIREBASE_CREDENTIALS`, `FIREBASE_PROJECT_ID`).
+
+### Delete Password
+Delete operations require password authentication defined in backend configuration.
+
+### NativePHP Auto-Updater
+Desktop app auto-updates from GitHub Releases. Config in `.env` (`NATIVEPHP_UPDATER_ENABLED`, `GITHUB_REPO`, `GITHUB_OWNER`).
+
+## Tech Stack Summary
+
+| Layer | Technology |
+|-------|-----------|
+| Backend | Laravel 12, PHP 8.3+ |
+| Frontend | React 19, TypeScript, Inertia.js |
+| Styling | Tailwind CSS v4 |
+| Desktop | NativePHP Electron |
+| Database | SQLite |
+| Cloud Sync | Firebase Firestore |
+| Build/CI | GitHub Actions |
+| i18n | i18next (EN/AR) |
+
+## Important Notes
+
+- The `tsconfig.json` has `"types": ["vite/client"]` to support `import.meta.glob`
+- Path alias: `@/*` maps to `resources/js/*`
+- Tests use `$this->withoutVite()` to avoid requiring Vite manifest in CI
+- The `.env.example` has Firebase and NativePHP vars commented out
+- The `config/nativephp.php` configures the desktop app (app_id: `com.enterprisflow.app`)

@@ -39,6 +39,8 @@ export default function TreasuryPage() {
     // Transaction view
     const [viewingCode, setViewingCode] = useState<string | null>(null);
     const [transactions, setTransactions] = useState<LedgerLog[]>([]);
+    const [txSortBy, setTxSortBy] = useState('logged_at');
+    const [txSortDir, setTxSortDir] = useState<'asc' | 'desc'>('desc');
 
     // Delete / Reset
     const [deleteTarget, setDeleteTarget] = useState<{ code: string; name: string } | null>(null);
@@ -129,8 +131,39 @@ export default function TreasuryPage() {
             const res = await api.get('/api/ledger/treasury/transactions', { params: { code } });
             setTransactions(res.data);
             setViewingCode(code);
+            setTxSortBy('logged_at');
+            setTxSortDir('desc');
         } catch { toast(t('sync_failed'), 'error'); }
     };
+
+    const toggleTxSort = (col: string) => {
+        if (txSortBy === col) setTxSortDir(d => d === 'asc' ? 'desc' : 'asc');
+        else { setTxSortBy(col); setTxSortDir('asc'); }
+    };
+
+    const sortedTransactions = [...transactions].sort((a, b) => {
+        const aVal = (a as any)[txSortBy];
+        const bVal = (b as any)[txSortBy];
+        if (aVal == null && bVal == null) return 0;
+        if (aVal == null) return txSortDir === 'asc' ? -1 : 1;
+        if (bVal == null) return txSortDir === 'asc' ? 1 : -1;
+        const cmp = typeof aVal === 'number' && typeof bVal === 'number'
+            ? aVal - bVal
+            : String(aVal).localeCompare(String(bVal));
+        return txSortDir === 'asc' ? cmp : -cmp;
+    });
+
+    const TxSortHeader = ({ col, children }: { col: string; children: React.ReactNode }) => (
+        <th
+            onClick={() => toggleTxSort(col)}
+            className="px-3 py-2 text-xs font-semibold text-gray-500 text-start cursor-pointer hover:text-gray-900 select-none whitespace-nowrap"
+        >
+            <span className="inline-flex items-center gap-1">
+                {children}
+                {txSortBy === col && <span className="text-indigo-600">{txSortDir === 'asc' ? '\u25B2' : '\u25BC'}</span>}
+            </span>
+        </th>
+    );
 
     const confirmDelete = async () => {
         if (!deleteTarget) return;
@@ -273,18 +306,18 @@ export default function TreasuryPage() {
                                                             <table className="w-full">
                                                                 <thead className="bg-gray-100">
                                                                     <tr>
-                                                                        <th className="px-3 py-2 text-xs font-semibold text-gray-500 text-start">{t('th_date')}</th>
-                                                                        <th className="px-3 py-2 text-xs font-semibold text-gray-500 text-start">{t('th_type')}</th>
-                                                                        <th className="px-3 py-2 text-xs font-semibold text-gray-500 text-start">{t('th_debit')}</th>
-                                                                        <th className="px-3 py-2 text-xs font-semibold text-gray-500 text-start">{t('th_credit')}</th>
-                                                                        <th className="px-3 py-2 text-xs font-semibold text-gray-500 text-start">{t('th_balance')}</th>
-                                                                        <th className="px-3 py-2 text-xs font-semibold text-gray-500 text-start">{t('th_statement')}</th>
+                                                                        <TxSortHeader col="logged_at">{t('th_date')}</TxSortHeader>
+                                                                        <TxSortHeader col="transaction_type">{t('th_type')}</TxSortHeader>
+                                                                        <TxSortHeader col="debit">{t('th_debit')}</TxSortHeader>
+                                                                        <TxSortHeader col="credit">{t('th_credit')}</TxSortHeader>
+                                                                        <TxSortHeader col="new_balance">{t('th_balance')}</TxSortHeader>
+                                                                        <TxSortHeader col="statement">{t('th_statement')}</TxSortHeader>
                                                                     </tr>
                                                                 </thead>
                                                                 <tbody className="divide-y divide-gray-100 bg-white">
-                                                                    {transactions.map((tx) => (
+                                                                    {sortedTransactions.map((tx) => (
                                                                         <tr key={tx.id}>
-                                                                            <td className="px-3 py-2 text-xs text-gray-600">{tx.logged_at?.split('T')[0]}</td>
+                                                                            <td className="px-3 py-2 text-xs text-gray-600 whitespace-nowrap">{tx.logged_at?.replace('T', ' ').slice(0, 19)}</td>
                                                                             <td className="px-3 py-2 text-xs"><Badge>{tx.transaction_type}</Badge></td>
                                                                             <td className="px-3 py-2 text-xs text-emerald-600">{Number(tx.debit).toFixed(2)}</td>
                                                                             <td className="px-3 py-2 text-xs text-red-500">{Number(tx.credit).toFixed(2)}</td>
