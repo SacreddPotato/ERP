@@ -78,7 +78,7 @@ LEDGER_TRANSACTION_FILES = {
 VERSION_FILE = os.path.join(BASE_PATH, 'version.json')
 
 # Current app version
-APP_VERSION = "1.32"
+APP_VERSION = "1.35"
 
 # New ledger files
 CUSTOMERS_FILE = os.path.join(DATA_PATH, 'customers_ledger.csv')
@@ -94,7 +94,7 @@ file_lock = Lock()
 
 # CSV column headers
 STOCK_HEADERS = ['id', 'name', 'category', 'unit', 'location', 'supplier', 'starting_balance', 'total_incoming', 'total_outgoing', 'net_stock', 'unit_price', 'min_stock', 'last_updated']
-TRANSACTION_HEADERS = ['timestamp', 'transaction_date', 'item_id', 'item_name', 'transaction_type', 'quantity', 'previous_stock', 'new_stock', 'supplier', 'price', 'document_type', 'document_number', 'notes']
+TRANSACTION_HEADERS = ['timestamp', 'transaction_date', 'item_id', 'item_name', 'transaction_type', 'quantity', 'previous_stock', 'new_stock', 'supplier', 'price', 'document_type', 'document_number', 'notes', 'factory']
 
 # Transaction-only headers (pure operations without edits/deletions)
 STOCK_TRANSACTION_HEADERS = ['timestamp', 'transaction_date', 'item_id', 'item_name', 'transaction_type', 'quantity', 'previous_stock', 'new_stock', 'supplier', 'price', 'document_type', 'document_number', 'notes', 'factory']
@@ -301,7 +301,8 @@ def log_transaction(item_id, item_name, trans_type, quantity, prev_stock, new_st
         'price': price,
         'document_type': document_type,
         'document_number': document_number,
-        'notes': notes
+        'notes': notes,
+        'factory': factory
     }
     
     # Log to full transaction log (includes edits/deletions)
@@ -804,7 +805,7 @@ def get_all_transactions(filters=None):
     factory_filter = filters.get('factory') if filters else None
     
     if factory_filter:
-        # Build lookup of items by ID to get their factory
+        # Build lookup of items by ID for backward compatibility with old entries missing factory field
         items_by_id = {}
         stock_file = get_stock_file(factory_filter)
         items = read_csv(stock_file, STOCK_HEADERS)
@@ -813,9 +814,10 @@ def get_all_transactions(filters=None):
         
         filtered_transactions = []
         for t in transactions:
-            item_id = (t.get('item_id', '') or '').strip().upper()
             notes = t.get('notes', '') or ''
             trans_type = t.get('transaction_type', '') or ''
+            trans_factory = (t.get('factory', '') or '').strip().lower()
+            item_id = (t.get('item_id', '') or '').strip().upper()
             
             # Check if this is an inter-factory transfer by parsing notes
             # Format: [FROM:source|TO:destination]
@@ -857,8 +859,12 @@ def get_all_transactions(filters=None):
                         
                         filtered_transactions.append(modified_trans)
             else:
-                # Regular transaction - include if item belongs to this factory
-                if item_id in items_by_id:
+                # Regular transaction - include if factory column matches
+                # This ensures transactions for deleted items still appear
+                if trans_factory and trans_factory == factory_filter.lower():
+                    filtered_transactions.append(t)
+                elif not trans_factory and item_id in items_by_id:
+                    # Backward compatibility: old entries without factory field
                     filtered_transactions.append(t)
         
         transactions = filtered_transactions
@@ -1025,6 +1031,70 @@ def get_all_ledger_transactions_for_sync():
 
 
 @eel.expose
+def get_all_full_transactions_log():
+    """Get all entries from the full transaction log (for Firebase sync)"""
+    try:
+        transactions = read_csv(TRANSACTIONS_FILE, TRANSACTION_HEADERS)
+        return transactions
+    except Exception as e:
+        print(f"[ERROR] Failed to read full transactions log: {e}")
+        return []
+
+
+@eel.expose
+def get_all_ledger_log():
+    """Get all entries from the combined ledger log (for Firebase sync)"""
+    try:
+        transactions = read_csv(LEDGER_LOG_FILE, LEDGER_LOG_HEADERS)
+        return transactions
+    except Exception as e:
+        print(f"[ERROR] Failed to read ledger log: {e}")
+        return []
+
+
+@eel.expose
+def import_full_transactions_log_from_cloud(transactions, skip_existing=False):
+    """Import full transaction log entries from cloud"""
+    try:
+        existing = read_csv(TRANSACTIONS_FILE, TRANSACTION_HEADERS)
+        existing_keys = set(f"{t['timestamp']}_{t.get('item_id','')}" for t in existing)
+        imported = 0
+        skipped = 0
+        for t in transactions:
+            key = f"{t['timestamp']}_{t.get('item_id','')}"
+            if key in existing_keys:
+                skipped += 1
+                continue
+            append_csv(TRANSACTIONS_FILE, TRANSACTION_HEADERS, t)
+            imported += 1
+        return {'success': True, 'imported': imported, 'skipped': skipped}
+    except Exception as e:
+        print(f"[ERROR] Failed to import full transactions log: {e}")
+        return {'success': False, 'message': str(e)}
+
+
+@eel.expose
+def import_ledger_log_from_cloud(transactions, skip_existing=False):
+    """Import combined ledger log entries from cloud"""
+    try:
+        existing = read_csv(LEDGER_LOG_FILE, LEDGER_LOG_HEADERS)
+        existing_keys = set(f"{t['timestamp']}_{t.get('entity_id','')}" for t in existing)
+        imported = 0
+        skipped = 0
+        for t in transactions:
+            key = f"{t['timestamp']}_{t.get('entity_id','')}"
+            if key in existing_keys:
+                skipped += 1
+                continue
+            append_csv(LEDGER_LOG_FILE, LEDGER_LOG_HEADERS, t)
+            imported += 1
+        return {'success': True, 'imported': imported, 'skipped': skipped}
+    except Exception as e:
+        print(f"[ERROR] Failed to import ledger log: {e}")
+        return {'success': False, 'message': str(e)}
+
+
+@eel.expose
 def get_module_transactions(ledger_type):
     """Get all transactions for a specific module (customer, supplier, treasury, covenant, advance)"""
     try:
@@ -1089,7 +1159,7 @@ def get_all_ledger_transactions(filters=None):
                         str(trans.get('ledger_type', '') or ''),
                         str(trans.get('entity_id', '') or ''),
                         str(trans.get('entity_name', '') or ''),
-                        str(trans.get('action_type', '') or ''),
+                        str(trans.get('transaction_type', '') or ''),
                         str(trans.get('document_number', '') or ''),
                         str(trans.get('statement', '') or ''),
                         str(trans.get('timestamp', '') or '')
@@ -3513,6 +3583,10 @@ def clear_all_local_data():
         write_csv(STOCK_TRANSACTIONS_FILE, STOCK_TRANSACTION_HEADERS, [])
         for ledger_type, file_path in LEDGER_TRANSACTION_FILES.items():
             write_csv(file_path, LEDGER_TRANSACTION_HEADERS, [])
+        
+        # Clear full log files (these contain all operations including edits/deletions)
+        write_csv(TRANSACTIONS_FILE, TRANSACTION_HEADERS, [])
+        write_csv(LEDGER_LOG_FILE, LEDGER_LOG_HEADERS, [])
         
         return {'success': True, 'message': 'All local data cleared'}
     except Exception as e:

@@ -96,7 +96,7 @@ async function syncStockItem(factory, item) {
             .set({
                 ...item,
                 lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
-            }, { merge: true });
+            });
         
         console.log(`✅ Synced item ${item.id} to Firebase`);
     } catch (error) {
@@ -121,7 +121,7 @@ async function syncAllStockItems(factory, items) {
             batch.set(docRef, {
                 ...item,
                 lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
-            }, { merge: true });
+            });
         });
         
         await batch.commit();
@@ -256,6 +256,82 @@ async function syncAllLedgerTransactions(transactions) {
 }
 
 /**
+ * Batch sync full transactions log (includes edits/deletions)
+ */
+async function syncAllFullTransactionsLog(transactions) {
+    const { db, isConfigured } = window.firebaseConfig;
+    
+    if (!isConfigured() || !FirebaseSync.isEnabled || !db) return 0;
+    if (!transactions || transactions.length === 0) return 0;
+    
+    try {
+        const BATCH_SIZE = 500;
+        let totalSynced = 0;
+        
+        for (let i = 0; i < transactions.length; i += BATCH_SIZE) {
+            const batch = db.batch();
+            const chunk = transactions.slice(i, i + BATCH_SIZE);
+            
+            chunk.forEach(transaction => {
+                const docId = `${transaction.timestamp}_${transaction.item_id}`.replace(/[\/\s:]/g, '_');
+                const docRef = db.collection('full_transactions_log').doc(docId);
+                batch.set(docRef, {
+                    ...transaction,
+                    syncedAt: firebase.firestore.FieldValue.serverTimestamp()
+                }, { merge: true });
+            });
+            
+            await batch.commit();
+            totalSynced += chunk.length;
+        }
+        
+        console.log(`✅ Batch synced ${totalSynced} full transaction log entries to Firebase`);
+        return totalSynced;
+    } catch (error) {
+        console.error('Failed to batch sync full transactions log:', error);
+        return 0;
+    }
+}
+
+/**
+ * Batch sync combined ledger log (includes edits/deletions)
+ */
+async function syncAllLedgerLog(transactions) {
+    const { db, isConfigured } = window.firebaseConfig;
+    
+    if (!isConfigured() || !FirebaseSync.isEnabled || !db) return 0;
+    if (!transactions || transactions.length === 0) return 0;
+    
+    try {
+        const BATCH_SIZE = 500;
+        let totalSynced = 0;
+        
+        for (let i = 0; i < transactions.length; i += BATCH_SIZE) {
+            const batch = db.batch();
+            const chunk = transactions.slice(i, i + BATCH_SIZE);
+            
+            chunk.forEach(transaction => {
+                const docId = `${transaction.timestamp}_${transaction.entity_id}`.replace(/[\/\s:]/g, '_');
+                const docRef = db.collection('ledger_log').doc(docId);
+                batch.set(docRef, {
+                    ...transaction,
+                    syncedAt: firebase.firestore.FieldValue.serverTimestamp()
+                }, { merge: true });
+            });
+            
+            await batch.commit();
+            totalSynced += chunk.length;
+        }
+        
+        console.log(`✅ Batch synced ${totalSynced} ledger log entries to Firebase`);
+        return totalSynced;
+    } catch (error) {
+        console.error('Failed to batch sync ledger log:', error);
+        return 0;
+    }
+}
+
+/**
  * Sync ledger entity (customer, supplier, etc.) - single item
  */
 async function syncLedgerEntity(ledgerType, entity) {
@@ -274,7 +350,7 @@ async function syncLedgerEntity(ledgerType, entity) {
             .set({
                 ...entity,
                 lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
-            }, { merge: true });
+            });
         
         console.log(`✅ Synced ${ledgerType} entity ${entityId} to Firebase`);
     } catch (error) {
@@ -307,7 +383,7 @@ async function syncAllLedgerEntities(ledgerType, entities) {
                 batch.set(docRef, {
                     ...entity,
                     lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
-                }, { merge: true });
+                });
             });
             
             await batch.commit();
@@ -398,8 +474,8 @@ async function executePushToCloud() {
         let totalSteps = 0;
         let completedSteps = 0;
         
-        // Count steps: 4 factories + 5 ledger types + treasury config + 2 transaction types
-        totalSteps = factories.length + 5 + 1 + 2; // 12 steps total
+        // Count steps: 4 factories + 5 ledger types + treasury config + 2 transaction types + 2 full logs
+        totalSteps = factories.length + 5 + 1 + 2 + 2; // 14 steps total
         
         const updateProgress = () => {
             const percentage = (completedSteps / totalSteps) * 100;
@@ -547,12 +623,45 @@ async function executePushToCloud() {
             updateProgress();
         }
         
+        // Push full transactions log (includes edits/deletions)
+        try {
+            const fullLog = await eel.get_all_full_transactions_log()();
+            if (fullLog && fullLog.length > 0) {
+                const synced = await syncAllFullTransactionsLog(fullLog);
+                totalSynced += synced;
+                console.log(`✅ Synced ${synced} full transaction log entries`);
+            }
+            completedSteps++;
+            updateProgress();
+        } catch (error) {
+            console.error('Failed to push full transactions log:', error);
+            completedSteps++;
+            updateProgress();
+        }
+        
+        // Push ledger log (combined ledger log with edits/deletions)
+        try {
+            const ledgerLog = await eel.get_all_ledger_log()();
+            if (ledgerLog && ledgerLog.length > 0) {
+                const synced = await syncAllLedgerLog(ledgerLog);
+                totalSynced += synced;
+                console.log(`✅ Synced ${synced} ledger log entries`);
+            }
+            completedSteps++;
+            updateProgress();
+        } catch (error) {
+            console.error('Failed to push ledger log:', error);
+            completedSteps++;
+            updateProgress();
+        }
+        
         // Complete
         updateSyncProgress(100);
         
         FirebaseSync.lastSyncTime = new Date();
-        FirebaseSync.lastSyncTimestamp = new Date();
-        localStorage.setItem('firebase_last_sync_timestamp', FirebaseSync.lastSyncTimestamp.toISOString());
+        // Note: Do NOT update lastSyncTimestamp here — it tracks the last PULL time
+        // for incremental sync. Updating it on push would cause subsequent pulls to
+        // miss changes made by other users between our last pull and this push.
         showSyncStatus('synced');
         
         console.log(`✅ Push completed: ${totalSynced} items pushed to cloud (using batch writes)`);
@@ -602,8 +711,8 @@ async function performPullFromCloud(silent = false, skipExisting = false) {
         const factories = ['bahbit', 'old_factory', 'station', 'thaabaneya'];
         
         // Calculate total steps for progress tracking
-        // 4 factories + 5 ledger types + treasury config + stock txns + 5 ledger txn types
-        const totalSteps = factories.length + 5 + 1 + 1 + 5; // 16 steps total
+        // 4 factories + 5 ledger types + treasury config + stock txns + 5 ledger txn types + 2 full logs
+        const totalSteps = factories.length + 5 + 1 + 1 + 5 + 2; // 18 steps total
         let completedSteps = 0;
         
         const updateProgress = () => {
@@ -907,6 +1016,64 @@ async function performPullFromCloud(silent = false, skipExisting = false) {
                 completedSteps++;
                 updateProgress();
             }
+        }
+        
+        // Pull full transactions log (includes edits/deletions)
+        try {
+            console.log('📥 Pulling full transactions log from cloud...');
+            const snapshot = await db.collection('full_transactions_log').get();
+            console.log(`📦 Found ${snapshot.size} full transaction log entries in cloud`);
+            
+            if (!snapshot.empty) {
+                const transactions = [];
+                snapshot.forEach(doc => {
+                    const data = doc.data();
+                    delete data.syncedAt;
+                    transactions.push(data);
+                });
+                
+                const result = await eel.import_full_transactions_log_from_cloud(transactions, skipExisting)();
+                if (result && result.success) {
+                    totalPulled += result.imported || 0;
+                    totalSkipped += result.skipped || 0;
+                    console.log(`✅ Imported ${result.imported} full transaction log entries, skipped ${result.skipped}`);
+                }
+            }
+            completedSteps++;
+            updateProgress();
+        } catch (error) {
+            console.error('Failed to pull full transactions log:', error);
+            completedSteps++;
+            updateProgress();
+        }
+        
+        // Pull ledger log (combined ledger log with edits/deletions)
+        try {
+            console.log('📥 Pulling ledger log from cloud...');
+            const snapshot = await db.collection('ledger_log').get();
+            console.log(`📦 Found ${snapshot.size} ledger log entries in cloud`);
+            
+            if (!snapshot.empty) {
+                const transactions = [];
+                snapshot.forEach(doc => {
+                    const data = doc.data();
+                    delete data.syncedAt;
+                    transactions.push(data);
+                });
+                
+                const result = await eel.import_ledger_log_from_cloud(transactions, skipExisting)();
+                if (result && result.success) {
+                    totalPulled += result.imported || 0;
+                    totalSkipped += result.skipped || 0;
+                    console.log(`✅ Imported ${result.imported} ledger log entries, skipped ${result.skipped}`);
+                }
+            }
+            completedSteps++;
+            updateProgress();
+        } catch (error) {
+            console.error('Failed to pull ledger log:', error);
+            completedSteps++;
+            updateProgress();
         }
         
         // Complete

@@ -717,7 +717,8 @@ html[dir="rtl"] .input-group-flush .input-flush-right {
     border-bottom: 1px solid var(--border-color);
 }
 
-.data-table th {
+.data-table th,
+.history-table th {
     background: var(--bg-color);
     font-weight: 600;
     color: var(--text-muted);
@@ -725,6 +726,39 @@ html[dir="rtl"] .input-group-flush .input-flush-right {
     font-size: 0.8rem;
     letter-spacing: 0.5px;
     white-space: nowrap;
+}
+
+.data-table th.sortable,
+.history-table th.sortable {
+    cursor: pointer;
+    user-select: none;
+    position: relative;
+    transition: background 0.2s;
+}
+
+.data-table th.sortable:hover,
+.history-table th.sortable:hover {
+    background: var(--hover-bg, #e5e7eb);
+    color: var(--text-color);
+}
+
+.sort-inactive {
+    opacity: 0.3;
+    font-size: 0.75em;
+    margin-left: 4px;
+}
+
+.sort-active {
+    opacity: 1;
+    font-size: 0.75em;
+    margin-left: 4px;
+    color: var(--primary-color);
+}
+
+[dir="rtl"] .sort-inactive,
+[dir="rtl"] .sort-active {
+    margin-left: 0;
+    margin-right: 4px;
 }
 
 .data-table tbody tr:hover {

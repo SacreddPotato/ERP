@@ -101,12 +101,12 @@ def main():
         if ENABLE_AUTO_UPLOAD and GOOGLE_DRIVE_FOLDER_ID != "YOUR_FOLDER_ID_HERE":
             try:
                 download_url = upload_to_drive()
-                print("✅ Upload complete!")
+                print("  [OK] Upload complete!")
             except Exception as e:
-                print(f"⚠️ Drive upload failed: {e}")
+                print(f"  [WARNING] Drive upload failed: {e}")
                 print("  Firebase will still be updated without a download URL.")
         elif ENABLE_AUTO_UPLOAD:
-            print("⚠️ GOOGLE_DRIVE_FOLDER_ID not set — skipping Drive upload.")
+            print("  [WARNING] GOOGLE_DRIVE_FOLDER_ID not set — skipping Drive upload.")
         else:
             print("  Drive upload disabled — skipping.")
 
@@ -114,9 +114,9 @@ def main():
         try:
             ensure_firebase_deps()
             update_firebase_version(download_url)
-            print("✅ Firebase version updated!")
+            print("  [OK] Firebase version updated!")
         except Exception as e:
-            print(f"⚠️ Firebase update failed: {e}")
+            print(f"  [WARNING] Firebase update failed: {e}")
             print("  You can manually update Firestore → app_config/version")
         
     except subprocess.CalledProcessError as e:
@@ -130,7 +130,7 @@ def upload_to_drive():
     from pydrive2.drive import GoogleDrive
 
     # Authenticate with Google Drive
-    print("  → Authenticating with Google Drive...")
+    print("  -> Authenticating with Google Drive...")
 
     # Force offline access so we always get a refresh_token
     settings = {
@@ -147,19 +147,31 @@ def upload_to_drive():
     # Try to load saved credentials
     gauth.LoadCredentialsFile("mycreds.txt")
 
+    def _fresh_auth():
+        """Delete stale credentials and perform a fresh browser login."""
+        if os.path.exists("mycreds.txt"):
+            os.remove("mycreds.txt")
+        gauth.credentials = None
+        print("  -> Please authorize in your browser...")
+        gauth.LocalWebserverAuth()
+
     if gauth.credentials is None:
         # No saved creds — full browser auth
-        print("  → First time setup: Please authorize in your browser...")
+        print("  -> First time setup: Please authorize in your browser...")
         gauth.LocalWebserverAuth()
     elif gauth.access_token_expired:
         if gauth.credentials.refresh_token:
-            print("  → Refreshing expired credentials...")
-            gauth.Refresh()
+            try:
+                print("  -> Refreshing expired credentials...")
+                gauth.Refresh()
+            except Exception as refresh_err:
+                # invalid_grant or any other refresh failure — force re-auth
+                print(f"  -> Token refresh failed ({refresh_err}), re-authenticating...")
+                _fresh_auth()
         else:
             # Stale creds with no refresh token — re-auth
-            print("  → Credentials missing refresh token, re-authenticating...")
-            os.remove("mycreds.txt")
-            gauth.LocalWebserverAuth()
+            print("  -> Credentials missing refresh token, re-authenticating...")
+            _fresh_auth()
     else:
         gauth.Authorize()
 
@@ -181,7 +193,7 @@ def upload_to_drive():
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"EnterprisFlow_v{version}_{timestamp}.exe"
     
-    print(f"  → Uploading as: {filename}")
+    print(f"  -> Uploading as: {filename}")
     
     # Check if file exists in the folder and delete old versions
     file_list = drive.ListFile({
@@ -193,9 +205,9 @@ def upload_to_drive():
     exe_files.sort(key=lambda x: x['title'], reverse=True)
     
     if len(exe_files) >= 3:
-        print(f"  → Removing old versions (keeping latest 3)...")
+        print(f"  -> Removing old versions (keeping latest 3)...")
         for old_file in exe_files[2:]:  # Keep latest 2, delete rest
-            print(f"    • Deleting: {old_file['title']}")
+            print(f"    - Deleting: {old_file['title']}")
             old_file.Delete()
     
     # Upload new file
@@ -216,8 +228,8 @@ def upload_to_drive():
     
     download_url = f"https://drive.google.com/uc?export=download&id={file_drive['id']}"
     alt_url = file_drive['alternateLink']
-    print(f"  → View URL: {alt_url}")
-    print(f"  → Direct Download URL: {download_url}")
+    print(f"  -> View URL: {alt_url}")
+    print(f"  -> Direct Download URL: {download_url}")
     
     # Save download URL to a file for reference
     with open('latest_download_url.txt', 'w') as f:
@@ -226,7 +238,7 @@ def upload_to_drive():
         f.write(f"View: {alt_url}\n")
         f.write(f"Download: {download_url}\n")
     
-    print("  → Download URL saved to: latest_download_url.txt")
+    print("  -> Download URL saved to: latest_download_url.txt")
     
     return download_url
 
@@ -242,7 +254,7 @@ def update_firebase_version(download_url):
         with open('version.json', 'r', encoding='utf-8') as f:
             version_data = json.load(f)
     except:
-        print("  ⚠️ Could not read version.json")
+        print("  [WARNING] Could not read version.json")
         return
     
     # Initialize Firebase Admin SDK
@@ -250,7 +262,7 @@ def update_firebase_version(download_url):
     SERVICE_ACCOUNT_FILE = 'firebase-service-account.json'
     
     if not os.path.exists(SERVICE_ACCOUNT_FILE):
-        print(f"  ⚠️ {SERVICE_ACCOUNT_FILE} not found!")
+        print(f"  [WARNING] {SERVICE_ACCOUNT_FILE} not found!")
         print("  To set up:")
         print("  1. Go to Firebase Console → Project Settings → Service Accounts")
         print("  2. Click 'Generate new private key'")
@@ -274,7 +286,7 @@ def update_firebase_version(download_url):
     }
     
     db.collection('app_config').document('version').set(doc_data)
-    print(f"  → Firebase updated: version={doc_data['version']}, download_url set")
+    print(f"  -> Firebase updated: version={doc_data['version']}, download_url set")
 
 
 if __name__ == '__main__':

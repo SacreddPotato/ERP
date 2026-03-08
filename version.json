@@ -1,11 +1,10 @@
 {
-    "version": "1.32",
-    "build_date": "2026-02-28",
+    "version": "1.35",
+    "build_date": "2026-03-08",
     "changelog": [
-        "Fixed Firebase pull: all transaction types now download correctly",
-        "Module search now searches through transaction history",
-        "Transaction-matched rows highlighted with amber border and match count badge",
-        "Fixed false-positive search matches caused by numeric balance fields",
-        "Expanding a transaction-matched row auto-fills the history search"
+        "Added dynamic sorting to all main tables and nested module transaction histories",
+        "Fixed bug with missing transaction logs for deleted items by persisting factory column",
+        "Fixed Firebase sync issues to safely pull and push full comprehensive logs and correctly overwrite entity data",
+        "Configured all transaction pages to sort by explicit transaction dates by default"
     ]
 }

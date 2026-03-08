@@ -16,17 +16,17 @@ Your ERP system now has an auto-update feature that checks Firebase for new vers
 When you need to update the Python backend or add new features:
 
 1. **Update version in app.py**:
-   - Change `APP_VERSION = "1.31"` to the new version (e.g., "1.32")
+   - Change `APP_VERSION = "1.34"` to the new version (e.g., "1.35")
 
 2. **Update version.json**:
    ```json
    {
-       "version": "1.32",
-       "build_date": "2026-02-16",
+       "version": "1.35",
+       "build_date": "2026-03-08",
        "changelog": [
-           "Added new feature X",
-           "Fixed bug Y",
-           "Improved performance Z"
+           "Added sorting to all tables",
+           "Fixed deleted item transactions bug",
+           "Added full log syncing via Firebase"
        ]
    }
    ```

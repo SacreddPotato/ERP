@@ -12,6 +12,107 @@ let transactionFilters = {};
 let treasuryKeywords = [];
 let currentFactory = localStorage.getItem('currentFactory') || 'bahbit'; // Default factory context
 
+// ============================================
+// Table Sort State & Cache
+// ============================================
+const tableSortState = {};
+const tableDataCache = {
+    'stock-table': [],
+    'transactions-table': [],
+    'customers-table': [],
+    'suppliers-table': [],
+    'treasury-table': [],
+    'covenants-table': [],
+    'advances-table': []
+};
+
+function handleSort(tableId, columnKey, dataType = 'string') {
+    const state = tableSortState[tableId] || { column: null, direction: 'asc' };
+    
+    if (state.column === columnKey) {
+        state.direction = state.direction === 'asc' ? 'desc' : 'asc';
+    } else {
+        state.column = columnKey;
+        state.direction = 'asc';
+    }
+    tableSortState[tableId] = state;
+    
+    // Sort cached data
+    const data = tableDataCache[tableId] || [];
+    const sortedData = sortData(data, columnKey, state.direction, dataType);
+    
+    // Re-render appropriate table
+    if (tableId.startsWith('history-table-')) {
+        const entityId = tableId.replace('history-table-', '');
+        // We can determine if it's an item or entity by checking if it's a ledger table or stock
+        // Actually, item history has different columns than entity history.
+        // renderItemHistory is for stock items. renderEntityHistory is for ledger entities.
+        // Let's use a try-catch or check the first row's properties
+        if (sortedData.length > 0) {
+            if ('item_id' in sortedData[0] || 'quantity' in sortedData[0]) {
+                renderItemHistory(entityId, sortedData);
+            } else {
+                renderEntityHistory(entityId, sortedData);
+            }
+        }
+        return;
+    }
+
+    switch(tableId) {
+        case 'stock-table': renderStockTable(sortedData); break;
+        case 'transactions-table': 
+            if (currentLogSource === 'stock') renderTransactionTable(sortedData);
+            else renderLedgerTransactionTable(sortedData);
+            break;
+        case 'customers-table': renderCustomersTable(sortedData); break;
+        case 'suppliers-table': renderSuppliersTable(sortedData); break;
+        case 'treasury-table': renderTreasuryTable(sortedData); break;
+        case 'covenants-table': renderCovenantsTable(sortedData); break;
+        case 'advances-table': renderAdvancesTable(sortedData); break;
+    }
+}
+
+function sortData(data, column, direction, type = 'string') {
+    if (!column) return data;
+    
+    return [...data].sort((a, b) => {
+        let valA = a[column];
+        let valB = b[column];
+        
+        // Handle missing values
+        if (valA === undefined || valA === null) valA = '';
+        if (valB === undefined || valB === null) valB = '';
+        
+        if (type === 'number') {
+            valA = parseFloat(valA) || 0;
+            valB = parseFloat(valB) || 0;
+            return direction === 'asc' ? valA - valB : valB - valA;
+        } else if (type === 'date' || type === 'date_fallback') {
+            // For dates, string comparison works well if they are YYYY-MM-DD
+            // However, transaction_date might be empty, so we fall back to timestamp if type is date_fallback
+            if (type === 'date_fallback') {
+                valA = a['transaction_date'] || a['timestamp'] || '';
+                valB = b['transaction_date'] || b['timestamp'] || '';
+            }
+            return direction === 'asc' ? valA.localeCompare(valB) : valB.localeCompare(valA);
+        } else {
+            valA = valA.toString().toLowerCase();
+            valB = valB.toString().toLowerCase();
+            if (valA < valB) return direction === 'asc' ? -1 : 1;
+            if (valA > valB) return direction === 'asc' ? 1 : -1;
+            return 0;
+        }
+    });
+}
+
+function makeSortableHeader(tableId, label, columnKey, dataType = 'string') {
+    const state = tableSortState[tableId] || { column: null, direction: 'asc' };
+    const isActive = state.column === columnKey;
+    const arrow = isActive ? (state.direction === 'asc' ? ' ▲' : ' ▼') : ' ⇅';
+    const arrowClass = isActive ? 'sort-active' : 'sort-inactive';
+    return `<th class="sortable" onclick="handleSort('${tableId}', '${columnKey}', '${dataType}')">${label}<span class="${arrowClass}">${arrow}</span></th>`;
+}
+
 // Delete password (must match backend)
 const DELETE_PASSWORD = '2048';
 
@@ -1274,10 +1375,18 @@ async function updateStock() {
 // ============================================
 async function loadStockData() {
     try {
-        // Add current factory to filters
-        const filtersWithFactory = { ...stockFilters, factory: currentFactory };
-        const items = await eel.get_all_items(filtersWithFactory)();
-        renderStockTable(items);
+        const filters = { ...stockFilters, factory: currentFactory };
+        const items = await eel.get_all_items(filters)();
+        
+        // Save to cache
+        tableDataCache['stock-table'] = items;
+        
+        // Sort if active, else use default backend order
+        const state = tableSortState['stock-table'];
+        const sortedItems = state && state.column ? sortData(items, state.column, state.direction, state.dataType) : items;
+        
+        renderStockTable(sortedItems);
+        
         const lang = window.i18n?.currentLang() || 'en';
         const itemWord = lang === 'ar' ? 'صنف' : (items.length !== 1 ? 'items' : 'item');
         const showingWord = lang === 'ar' ? 'عرض' : 'Showing';
@@ -1291,17 +1400,45 @@ async function loadStockData() {
 
 function renderStockTable(items) {
     const tbody = document.getElementById('stock-table-body');
+    const thead = document.querySelector('#stock-table-container thead tr');
     const lang = window.i18n?.currentLang() || 'en';
     const noItemsMsg = lang === 'ar' ? 'لا توجد أصناف. أضف أول صنف!' : 'No items found. Add your first item!';
     const updateBtn = lang === 'ar' ? 'تحديث' : 'Update';
     const deleteBtn = lang === 'ar' ? 'حذف' : 'Delete';
     
+    // Set headers with sort functionality
+    if (thead) {
+        thead.innerHTML = `
+            ${makeSortableHeader('stock-table', lang === 'ar' ? 'رقم الصنف' : 'ID', 'id')}
+            ${makeSortableHeader('stock-table', lang === 'ar' ? 'الاسم' : 'Name', 'name')}
+            ${makeSortableHeader('stock-table', lang === 'ar' ? 'التصنيف' : 'Category', 'category')}
+            ${makeSortableHeader('stock-table', lang === 'ar' ? 'الوحدة' : 'Unit', 'unit')}
+            ${makeSortableHeader('stock-table', lang === 'ar' ? 'الموقع' : 'Location', 'location')}
+            ${makeSortableHeader('stock-table', lang === 'ar' ? 'المورد' : 'Supplier', 'supplier')}
+            ${makeSortableHeader('stock-table', lang === 'ar' ? 'رصيد افتتاحي' : 'Starting', 'starting_balance', 'number')}
+            ${makeSortableHeader('stock-table', lang === 'ar' ? 'وارد' : 'In', 'total_incoming', 'number')}
+            ${makeSortableHeader('stock-table', lang === 'ar' ? 'صادر' : 'Out', 'total_outgoing', 'number')}
+            ${makeSortableHeader('stock-table', lang === 'ar' ? 'رصيد حالي' : 'Net Stock', 'net_stock', 'number')}
+            ${makeSortableHeader('stock-table', lang === 'ar' ? 'السعر' : 'Unit Price', 'unit_price', 'number')}
+            <th class="sortable" onclick="handleSort('stock-table', 'total_value', 'number')">${lang === 'ar' ? 'الإجمالي' : 'Total Value'}<span class="${tableSortState['stock-table']?.column === 'total_value' ? 'sort-active' : 'sort-inactive'}">${tableSortState['stock-table']?.column === 'total_value' ? (tableSortState['stock-table']?.direction === 'asc' ? ' ▲' : ' ▼') : ' ⇅'}</span></th>
+            ${makeSortableHeader('stock-table', lang === 'ar' ? 'حد أدنى' : 'Min', 'min_stock', 'number')}
+            ${makeSortableHeader('stock-table', lang === 'ar' ? 'تحديث' : 'Updated', 'last_updated', 'date')}
+            <th class="no-print">${lang === 'ar' ? 'إجراءات' : 'Actions'}</th>
+        `;
+    }
+    
     if (items.length === 0) {
         tbody.innerHTML = `<tr class="empty-row"><td colspan="15">${noItemsMsg}</td></tr>`;
         return;
     }
+    
+    // Make sure total_value is computed for sorting if we sort by it
+    const itemsWithComputed = items.map(item => ({
+        ...item,
+        total_value: parseFloat(item.net_stock || 0) * parseFloat(item.unit_price || 0)
+    }));
 
-    tbody.innerHTML = items.map(item => {
+    tbody.innerHTML = itemsWithComputed.map(item => {
         const netStock = parseFloat(item.net_stock);
         const minStock = parseFloat(item.min_stock || 0);
         const unitPrice = parseFloat(item.unit_price || 0);
@@ -1436,23 +1573,32 @@ function renderItemHistory(itemId, transactions) {
         'finished_product_receipt': lang === 'ar' ? 'اذن استلام - منتج تام' : 'Finished Product Receipt'
     };
     
+    const tableId = `history-table-${itemId}`;
+    
+    // Apply current sort state or fallback to default (transaction date desc)
+    tableDataCache[tableId] = transactions;
+    const state = tableSortState[tableId];
+    const sortedTransactions = state && state.column ? 
+        sortData(transactions, state.column, state.direction, state.dataType) : 
+        sortData(transactions, 'transaction_date', 'desc', 'date_fallback');
+    
     const html = `
-        <table class="history-table">
+        <table class="history-table" id="${tableId}">
             <thead>
                 <tr>
-                    <th>${lang === 'ar' ? 'التاريخ' : 'Date'}</th>
-                    <th>${lang === 'ar' ? 'النوع' : 'Type'}</th>
-                    <th>${lang === 'ar' ? 'الكمية' : 'Quantity'}</th>
-                    <th>${lang === 'ar' ? 'الرصيد السابق' : 'Previous'}</th>
-                    <th>${lang === 'ar' ? 'الرصيد الجديد' : 'New'}</th>
-                    <th>${lang === 'ar' ? 'المورد' : 'Supplier'}</th>
+                    ${makeSortableHeader(tableId, lang === 'ar' ? 'التاريخ' : 'Date', 'timestamp', 'date_fallback')}
+                    ${makeSortableHeader(tableId, lang === 'ar' ? 'النوع' : 'Type', 'transaction_type')}
+                    ${makeSortableHeader(tableId, lang === 'ar' ? 'الكمية' : 'Quantity', 'quantity', 'number')}
+                    ${makeSortableHeader(tableId, lang === 'ar' ? 'الرصيد السابق' : 'Previous', 'previous_stock', 'number')}
+                    ${makeSortableHeader(tableId, lang === 'ar' ? 'الرصيد الجديد' : 'New', 'new_stock', 'number')}
+                    ${makeSortableHeader(tableId, lang === 'ar' ? 'المورد' : 'Supplier', 'supplier')}
                     <th>${lang === 'ar' ? 'نوع المستند' : 'Doc Type'}</th>
-                    <th>${lang === 'ar' ? 'رقم المستند' : 'Doc #'}</th>
+                    ${makeSortableHeader(tableId, lang === 'ar' ? 'رقم المستند' : 'Doc #', 'document_number')}
                     <th>${lang === 'ar' ? 'ملاحظات' : 'Notes'}</th>
                 </tr>
             </thead>
             <tbody>
-                ${transactions.map(trans => {
+                ${sortedTransactions.map(trans => {
                     const transType = transTypeTranslations[trans.transaction_type] || trans.transaction_type;
                     const docType = docTypeTranslations[trans.document_type] || trans.document_type || '-';
                     const badgeClass = `badge-${trans.transaction_type.toLowerCase()}`;
@@ -1593,24 +1739,33 @@ function renderEntityHistory(entityId, transactions) {
         'check': lang === 'ar' ? 'شيك' : 'Check'
     };
     
+    const tableId = `history-table-${entityId}`;
+    
+    // Apply current sort state or fallback to default (transaction date desc)
+    tableDataCache[tableId] = transactions;
+    const state = tableSortState[tableId];
+    const sortedTransactions = state && state.column ? 
+        sortData(transactions, state.column, state.direction, state.dataType) : 
+        sortData(transactions, 'transaction_date', 'desc', 'date_fallback');
+    
     const html = `
-        <table class="history-table">
+        <table class="history-table" id="${tableId}">
             <thead>
                 <tr>
-                    <th>${lang === 'ar' ? 'وقت التسجيل' : 'Logged At'}</th>
-                    <th>${lang === 'ar' ? 'تاريخ العملية' : 'Trans. Date'}</th>
-                    <th>${lang === 'ar' ? 'النوع' : 'Type'}</th>
-                    <th>${lang === 'ar' ? 'مدين' : 'Debit'}</th>
-                    <th>${lang === 'ar' ? 'دائن' : 'Credit'}</th>
-                    <th>${lang === 'ar' ? 'الرصيد السابق' : 'Previous'}</th>
-                    <th>${lang === 'ar' ? 'الرصيد الجديد' : 'New'}</th>
+                    ${makeSortableHeader(tableId, lang === 'ar' ? 'وقت التسجيل' : 'Logged At', 'timestamp', 'date')}
+                    ${makeSortableHeader(tableId, lang === 'ar' ? 'تاريخ العملية' : 'Trans. Date', 'transaction_date', 'date')}
+                    ${makeSortableHeader(tableId, lang === 'ar' ? 'النوع' : 'Type', 'transaction_type')}
+                    ${makeSortableHeader(tableId, lang === 'ar' ? 'مدين' : 'Debit', 'debit', 'number')}
+                    ${makeSortableHeader(tableId, lang === 'ar' ? 'دائن' : 'Credit', 'credit', 'number')}
+                    ${makeSortableHeader(tableId, lang === 'ar' ? 'الرصيد السابق' : 'Previous', 'previous_balance', 'number')}
+                    ${makeSortableHeader(tableId, lang === 'ar' ? 'الرصيد الجديد' : 'New', 'new_balance', 'number')}
                     <th>${lang === 'ar' ? 'طريقة الدفع' : 'Payment'}</th>
-                    <th>${lang === 'ar' ? 'رقم المستند' : 'Doc #'}</th>
+                    ${makeSortableHeader(tableId, lang === 'ar' ? 'رقم المستند' : 'Doc #', 'document_number')}
                     <th>${lang === 'ar' ? 'البيان' : 'Statement'}</th>
                 </tr>
             </thead>
             <tbody>
-                ${transactions.map(trans => {
+                ${sortedTransactions.map(trans => {
                     const paymentDisplay = paymentTranslations[trans.payment_method] || trans.payment_method || '-';
                     const debit = parseFloat(trans.debit || 0);
                     const credit = parseFloat(trans.credit || 0);
@@ -1918,7 +2073,18 @@ async function loadTransactionData() {
                 filters.local_only = true;
             }
             const transactions = await eel.get_all_transactions(filters)();
-            renderTransactionTable(transactions);
+            
+            // Save to cache
+            tableDataCache['transactions-table'] = transactions;
+            
+            // Apply current sort state or fallback to default (logged at desc)
+            const state = tableSortState['transactions-table'];
+            const sortedTransactions = state && state.column ? 
+                sortData(transactions, state.column, state.direction, state.dataType) : 
+                sortData(transactions, 'transaction_date', 'desc', 'date_fallback');
+            
+            renderTransactionTable(sortedTransactions);
+            
             const lang = window.i18n?.currentLang() || 'en';
             const transWord = lang === 'ar' ? 'معاملة' : (transactions.length !== 1 ? 'transactions' : 'transaction');
             const showingWord = lang === 'ar' ? 'عرض' : 'Showing';
@@ -1947,7 +2113,18 @@ async function loadTransactionData() {
             });
             
             const transactions = await eel.get_all_ledger_transactions(filters)();
-            renderLedgerTransactionTable(transactions);
+            
+            // Save to cache
+            tableDataCache['transactions-table'] = transactions;
+            
+            // Apply current sort state or fallback to default (logged at desc)
+            const state = tableSortState['transactions-table'];
+            const sortedTransactions = state && state.column ? 
+                sortData(transactions, state.column, state.direction, state.dataType) : 
+                sortData(transactions, 'transaction_date', 'desc', 'date_fallback');
+            
+            renderLedgerTransactionTable(sortedTransactions);
+            
             const lang = window.i18n?.currentLang() || 'en';
             const transWord = lang === 'ar' ? 'معاملة' : (transactions.length !== 1 ? 'transactions' : 'transaction');
             const showingWord = lang === 'ar' ? 'عرض' : 'Showing';
@@ -1965,19 +2142,19 @@ function renderTransactionTable(transactions) {
     const lang = window.i18n?.currentLang() || 'en';
     const noTransMsg = lang === 'ar' ? 'لا توجد معاملات مسجلة بعد.' : 'No transactions recorded yet.';
     
-    // Restore stock transaction headers (in case ledger view changed them)
+    // Restore stock transaction headers with sort functionality
     thead.innerHTML = `
-        <th>${lang === 'ar' ? 'وقت التسجيل' : 'Logged At'}</th>
-        <th>${lang === 'ar' ? 'تاريخ العملية' : 'Trans. Date'}</th>
-        <th>${lang === 'ar' ? 'كود الصنف' : 'Item ID'}</th>
-        <th>${lang === 'ar' ? 'اسم الصنف' : 'Item Name'}</th>
-        <th>${lang === 'ar' ? 'النوع' : 'Type'}</th>
-        <th>${lang === 'ar' ? 'الكمية' : 'Quantity'}</th>
-        <th>${lang === 'ar' ? 'المخزون السابق' : 'Previous Stock'}</th>
-        <th>${lang === 'ar' ? 'المخزون الجديد' : 'New Stock'}</th>
-        <th>${lang === 'ar' ? 'المورد' : 'Supplier'}</th>
+        ${makeSortableHeader('transactions-table', lang === 'ar' ? 'وقت التسجيل' : 'Logged At', 'timestamp', 'date')}
+        ${makeSortableHeader('transactions-table', lang === 'ar' ? 'تاريخ العملية' : 'Trans. Date', 'transaction_date', 'date')}
+        ${makeSortableHeader('transactions-table', lang === 'ar' ? 'كود الصنف' : 'Item ID', 'item_id')}
+        ${makeSortableHeader('transactions-table', lang === 'ar' ? 'اسم الصنف' : 'Item Name', 'item_name')}
+        ${makeSortableHeader('transactions-table', lang === 'ar' ? 'النوع' : 'Type', 'transaction_type')}
+        ${makeSortableHeader('transactions-table', lang === 'ar' ? 'الكمية' : 'Quantity', 'quantity', 'number')}
+        ${makeSortableHeader('transactions-table', lang === 'ar' ? 'المخزون السابق' : 'Previous Stock', 'previous_stock', 'number')}
+        ${makeSortableHeader('transactions-table', lang === 'ar' ? 'المخزون الجديد' : 'New Stock', 'new_stock', 'number')}
+        ${makeSortableHeader('transactions-table', lang === 'ar' ? 'المورد' : 'Supplier', 'supplier')}
         <th>${lang === 'ar' ? 'نوع المستند' : 'Document Type'}</th>
-        <th>${lang === 'ar' ? 'رقم المستند' : 'Doc #'}</th>
+        ${makeSortableHeader('transactions-table', lang === 'ar' ? 'رقم المستند' : 'Doc #', 'document_number')}
         <th>${lang === 'ar' ? 'ملاحظات' : 'Notes'}</th>
         <th>${lang === 'ar' ? 'إجراءات' : 'Actions'}</th>
     `;
@@ -2010,14 +2187,10 @@ function renderTransactionTable(transactions) {
 
     const reverseBtn = lang === 'ar' ? 'عكس' : 'Reverse';
     const deleteBtn = lang === 'ar' ? 'حذف' : 'Delete';
-    // Sort by transaction_date (actual date) most recent first, fall back to timestamp
-    const sortedTransactions = [...transactions].sort((a, b) => {
-        const dateA = a.transaction_date || a.timestamp || '';
-        const dateB = b.transaction_date || b.timestamp || '';
-        return dateB.localeCompare(dateA);
-    });
-
-    tbody.innerHTML = sortedTransactions.map(trans => {
+    
+    // Sort is now handled by the generic sortData function before calling this render function
+    
+    tbody.innerHTML = transactions.map(trans => {
         let transTypeDisplay = transTypeTranslations[trans.transaction_type] || trans.transaction_type;
         let badgeClass = `badge-${trans.transaction_type.toLowerCase()}`;
         
@@ -2074,19 +2247,19 @@ function renderLedgerTransactionTable(transactions) {
     const lang = window.i18n?.currentLang() || 'en';
     const noTransMsg = lang === 'ar' ? 'لا توجد معاملات مسجلة بعد.' : 'No transactions recorded yet.';
     
-    // Update table headers for ledger transactions (with Actions column)
+    // Update table headers for ledger transactions (with sort functionality)
     thead.innerHTML = `
-        <th>${lang === 'ar' ? 'وقت التسجيل' : 'Logged At'}</th>
-        <th>${lang === 'ar' ? 'تاريخ العملية' : 'Trans. Date'}</th>
-        <th>${lang === 'ar' ? 'الرقم' : 'ID'}</th>
-        <th>${lang === 'ar' ? 'الاسم' : 'Name'}</th>
-        <th>${lang === 'ar' ? 'النوع' : 'Type'}</th>
-        <th>${lang === 'ar' ? 'مدين' : 'Debit'}</th>
-        <th>${lang === 'ar' ? 'دائن' : 'Credit'}</th>
-        <th>${lang === 'ar' ? 'الرصيد السابق' : 'Previous Balance'}</th>
-        <th>${lang === 'ar' ? 'الرصيد الجديد' : 'New Balance'}</th>
+        ${makeSortableHeader('transactions-table', lang === 'ar' ? 'وقت التسجيل' : 'Logged At', 'timestamp', 'date')}
+        ${makeSortableHeader('transactions-table', lang === 'ar' ? 'تاريخ العملية' : 'Trans. Date', 'transaction_date', 'date')}
+        ${makeSortableHeader('transactions-table', lang === 'ar' ? 'الرقم' : 'ID', 'entity_id')}
+        ${makeSortableHeader('transactions-table', lang === 'ar' ? 'الاسم' : 'Name', 'entity_name')}
+        ${makeSortableHeader('transactions-table', lang === 'ar' ? 'النوع' : 'Type', 'transaction_type')}
+        ${makeSortableHeader('transactions-table', lang === 'ar' ? 'مدين' : 'Debit', 'debit', 'number')}
+        ${makeSortableHeader('transactions-table', lang === 'ar' ? 'دائن' : 'Credit', 'credit', 'number')}
+        ${makeSortableHeader('transactions-table', lang === 'ar' ? 'الرصيد السابق' : 'Previous Balance', 'previous_balance', 'number')}
+        ${makeSortableHeader('transactions-table', lang === 'ar' ? 'الرصيد الجديد' : 'New Balance', 'new_balance', 'number')}
         <th>${lang === 'ar' ? 'طريقة الدفع' : 'Payment'}</th>
-        <th>${lang === 'ar' ? 'رقم المستند' : 'Doc #'}</th>
+        ${makeSortableHeader('transactions-table', lang === 'ar' ? 'رقم المستند' : 'Doc #', 'document_number')}
         <th>${lang === 'ar' ? 'البيان' : 'Statement'}</th>
         <th>${lang === 'ar' ? 'إجراءات' : 'Actions'}</th>
     `;
@@ -2106,14 +2279,9 @@ function renderLedgerTransactionTable(transactions) {
     const reverseBtn = lang === 'ar' ? 'عكس' : 'Reverse';
     const deleteBtn = lang === 'ar' ? 'حذف' : 'Delete';
 
-    // Sort by transaction_date (actual date) most recent first, fall back to timestamp
-    const sortedTransactions = [...transactions].sort((a, b) => {
-        const dateA = a.transaction_date || a.timestamp || '';
-        const dateB = b.transaction_date || b.timestamp || '';
-        return dateB.localeCompare(dateA);
-    });
+    // Sort is now handled by the generic sortData function before calling this render function
 
-    tbody.innerHTML = sortedTransactions.map(trans => {
+    tbody.innerHTML = transactions.map(trans => {
         const paymentDisplay = paymentTranslations[trans.payment_method] || trans.payment_method || '-';
         const debit = parseFloat(trans.debit || 0);
         const credit = parseFloat(trans.credit || 0);
@@ -2154,21 +2322,23 @@ function restoreStockTransactionHeaders() {
     const thead = document.querySelector('#transactions-table thead tr');
     const lang = window.i18n?.currentLang() || 'en';
     
-    thead.innerHTML = `
-        <th>${lang === 'ar' ? 'وقت التسجيل' : 'Logged At'}</th>
-        <th>${lang === 'ar' ? 'تاريخ العملية' : 'Trans. Date'}</th>
-        <th data-i18n="th_item_id">${lang === 'ar' ? 'رقم الصنف' : 'Item ID'}</th>
-        <th data-i18n="th_item_name">${lang === 'ar' ? 'اسم الصنف' : 'Item Name'}</th>
-        <th data-i18n="th_type">${lang === 'ar' ? 'النوع' : 'Type'}</th>
-        <th data-i18n="th_quantity">${lang === 'ar' ? 'الكمية' : 'Quantity'}</th>
-        <th data-i18n="th_prev_stock">${lang === 'ar' ? 'المخزون السابق' : 'Previous Stock'}</th>
-        <th data-i18n="th_new_stock">${lang === 'ar' ? 'المخزون الجديد' : 'New Stock'}</th>
-        <th data-i18n="th_supplier">${lang === 'ar' ? 'المورد' : 'Supplier'}</th>
-        <th data-i18n="th_document_type">${lang === 'ar' ? 'نوع المستند' : 'Document Type'}</th>
-        <th data-i18n="th_document_number">${lang === 'ar' ? 'رقم المستند' : 'Document #'}</th>
-        <th data-i18n="th_notes">${lang === 'ar' ? 'ملاحظات' : 'Notes'}</th>
-        <th>${lang === 'ar' ? 'إجراءات' : 'Actions'}</th>
-    `;
+    if (thead) {
+        thead.innerHTML = `
+            ${makeSortableHeader('transactions-table', lang === 'ar' ? 'وقت التسجيل' : 'Logged At', 'timestamp', 'date')}
+            ${makeSortableHeader('transactions-table', lang === 'ar' ? 'تاريخ العملية' : 'Trans. Date', 'transaction_date', 'date')}
+            ${makeSortableHeader('transactions-table', lang === 'ar' ? 'رقم الصنف' : 'Item ID', 'item_id')}
+            ${makeSortableHeader('transactions-table', lang === 'ar' ? 'اسم الصنف' : 'Item Name', 'item_name')}
+            ${makeSortableHeader('transactions-table', lang === 'ar' ? 'النوع' : 'Type', 'transaction_type')}
+            ${makeSortableHeader('transactions-table', lang === 'ar' ? 'الكمية' : 'Quantity', 'quantity', 'number')}
+            ${makeSortableHeader('transactions-table', lang === 'ar' ? 'المخزون السابق' : 'Previous Stock', 'previous_stock', 'number')}
+            ${makeSortableHeader('transactions-table', lang === 'ar' ? 'المخزون الجديد' : 'New Stock', 'new_stock', 'number')}
+            ${makeSortableHeader('transactions-table', lang === 'ar' ? 'المورد' : 'Supplier', 'supplier')}
+            <th>${lang === 'ar' ? 'نوع المستند' : 'Document Type'}</th>
+            ${makeSortableHeader('transactions-table', lang === 'ar' ? 'رقم المستند' : 'Document #', 'document_number')}
+            <th>${lang === 'ar' ? 'ملاحظات' : 'Notes'}</th>
+            <th>${lang === 'ar' ? 'إجراءات' : 'Actions'}</th>
+        `;
+    }
 }
 
 // ============================================
@@ -3944,8 +4114,15 @@ async function loadCustomersData() {
                 return idMatch || nameMatch || transactionMatchedIds.has(normalizeEntityId(item.id));
             });
         }
+        
+        // Save to cache
+        tableDataCache['customers-table'] = items;
+        
+        // Sort if active
+        const state = tableSortState['customers-table'];
+        const sortedItems = state && state.column ? sortData(items, state.column, state.direction, state.dataType) : items;
 
-        renderCustomersTable(items);
+        renderCustomersTable(sortedItems);
         if (searchLower) markTransactionMatchedRows('customer', transactionMatchedIds, entityMatchedIds, countByEntityId);
         const lang = window.i18n?.currentLang() || 'en';
         const itemWord = lang === 'ar' ? 'عميل' : (items.length !== 1 ? 'customers' : 'customer');
@@ -4225,8 +4402,15 @@ async function loadSuppliersData() {
                 return idMatch || nameMatch || transactionMatchedIds.has(normalizeEntityId(item.id));
             });
         }
+        
+        // Save to cache
+        tableDataCache['suppliers-table'] = items;
+        
+        // Sort if active
+        const state = tableSortState['suppliers-table'];
+        const sortedItems = state && state.column ? sortData(items, state.column, state.direction, state.dataType) : items;
 
-        renderSuppliersTable(items);
+        renderSuppliersTable(sortedItems);
         if (searchLower) markTransactionMatchedRows('supplier', transactionMatchedIds, entityMatchedIds, countByEntityId);
         const lang = window.i18n?.currentLang() || 'en';
         const itemWord = lang === 'ar' ? 'مورد' : (items.length !== 1 ? 'suppliers' : 'supplier');
@@ -4268,6 +4452,26 @@ function renderSuppliersTable(items) {
         'digital_wallet': lang === 'ar' ? 'محفظة إلكترونية' : 'Digital Wallet',
         'check': lang === 'ar' ? 'شيك' : 'Check'
     };
+    
+    // Set sortable headers
+    const thead = document.querySelector('#suppliers-table-container thead tr') || document.querySelector('#suppliers-table thead tr');
+    if (thead) {
+        thead.innerHTML = `
+            ${makeSortableHeader('suppliers-table', lang === 'ar' ? 'الرقم' : 'ID', 'id')}
+            ${makeSortableHeader('suppliers-table', lang === 'ar' ? 'الاسم' : 'Name', 'name')}
+            ${makeSortableHeader('suppliers-table', lang === 'ar' ? 'الهاتف' : 'Phone', 'phone')}
+            <th>${lang === 'ar' ? 'البريد الإلكتروني' : 'Email'}</th>
+            ${makeSortableHeader('suppliers-table', lang === 'ar' ? 'تاريخ التسجيل' : 'Reg Date', 'registration_date', 'date')}
+            ${makeSortableHeader('suppliers-table', lang === 'ar' ? 'رقم المستند' : 'Doc #', 'document_number')}
+            ${makeSortableHeader('suppliers-table', lang === 'ar' ? 'الرصيد الافتتاحي' : 'Opening', 'opening_balance', 'number')}
+            ${makeSortableHeader('suppliers-table', lang === 'ar' ? 'إجمالي مدين (عليه)' : 'Debit', 'debit', 'number')}
+            ${makeSortableHeader('suppliers-table', lang === 'ar' ? 'إجمالي دائن (له)' : 'Credit', 'credit', 'number')}
+            ${makeSortableHeader('suppliers-table', lang === 'ar' ? 'الرصيد الحالي' : 'Balance', 'balance', 'number')}
+            <th>${lang === 'ar' ? 'طريقة الدفع' : 'Payment'}</th>
+            <th>${lang === 'ar' ? 'البيان' : 'Statement'}</th>
+            <th class="no-print">${lang === 'ar' ? 'إجراءات' : 'Actions'}</th>
+        `;
+    }
     
     if (items.length === 0) {
         tbody.innerHTML = `<tr class="empty-row"><td colspan="13">${noItemsMsg}</td></tr>`;
@@ -4666,8 +4870,15 @@ async function loadTreasuryData() {
                 items = mergeItemsByEntityId(items, extraItems, 'treasury');
             }
         }
+        
+        // Save to cache
+        tableDataCache['treasury-table'] = items;
+        
+        // Sort if active
+        const state = tableSortState['treasury-table'];
+        const sortedItems = state && state.column ? sortData(items, state.column, state.direction, state.dataType) : items;
 
-        renderTreasuryTable(items);
+        renderTreasuryTable(sortedItems);
         if (transactionSearchTerms.length > 0) markTransactionMatchedRows('treasury', treasuryTransactionMatchedIds, treasuryEntityMatchedIds, treasuryCountByEntityId);
         await loadTreasuryTotalBalance();
         const lang = window.i18n?.currentLang() || 'en';
@@ -4744,6 +4955,24 @@ function renderTreasuryTable(items) {
         'digital_wallet': lang === 'ar' ? 'محفظة إلكترونية' : 'Digital Wallet',
         'check': lang === 'ar' ? 'شيك' : 'Check'
     };
+    
+    // Set sortable headers
+    const thead = document.querySelector('#treasury-table-container thead tr') || document.querySelector('#treasury-table thead tr');
+    if (thead) {
+        thead.innerHTML = `
+            ${makeSortableHeader('treasury-table', lang === 'ar' ? 'رقم الحساب' : 'Account #', 'account_number')}
+            ${makeSortableHeader('treasury-table', lang === 'ar' ? 'اسم الحساب' : 'Account Name', 'account_name')}
+            ${makeSortableHeader('treasury-table', lang === 'ar' ? 'تاريخ التسجيل' : 'Reg Date', 'registration_date', 'date')}
+            ${makeSortableHeader('treasury-table', lang === 'ar' ? 'رقم المستند' : 'Doc #', 'document_number')}
+            ${makeSortableHeader('treasury-table', lang === 'ar' ? 'الرصيد الافتتاحي' : 'Opening', 'opening_balance', 'number')}
+            ${makeSortableHeader('treasury-table', lang === 'ar' ? 'إجمالي وارد' : 'Debit (In)', 'debit', 'number')}
+            ${makeSortableHeader('treasury-table', lang === 'ar' ? 'إجمالي منصرف' : 'Credit (Out)', 'credit', 'number')}
+            ${makeSortableHeader('treasury-table', lang === 'ar' ? 'الرصيد الحالي' : 'Balance', 'balance', 'number')}
+            <th>${lang === 'ar' ? 'طريقة الدفع' : 'Payment'}</th>
+            <th>${lang === 'ar' ? 'البيان' : 'Statement'}</th>
+            <th class="no-print">${lang === 'ar' ? 'إجراءات' : 'Actions'}</th>
+        `;
+    }
     
     if (items.length === 0) {
         tbody.innerHTML = `<tr class="empty-row"><td colspan="11">${noItemsMsg}</td></tr>`;
@@ -4974,9 +5203,15 @@ async function loadCovenantsData() {
                 return idMatch || nameMatch || transactionMatchedIds.has(normalizeEntityId(item.id));
             });
         }
-
         
-        renderCovenantsTable(items);
+        // Save to cache
+        tableDataCache['covenants-table'] = items;
+        
+        // Sort if active
+        const state = tableSortState['covenants-table'];
+        const sortedItems = state && state.column ? sortData(items, state.column, state.direction, state.dataType) : items;
+        
+        renderCovenantsTable(sortedItems);
         if (searchLower) markTransactionMatchedRows('covenant', transactionMatchedIds, entityMatchedIds, countByEntityId);
         const lang = window.i18n?.currentLang() || 'en';
         const itemWord = lang === 'ar' ? 'عهدة' : (items.length !== 1 ? 'covenants' : 'covenant');
@@ -5018,6 +5253,25 @@ function renderCovenantsTable(items) {
         'digital_wallet': lang === 'ar' ? 'محفظة إلكترونية' : 'Digital Wallet',
         'check': lang === 'ar' ? 'شيك' : 'Check'
     };
+    
+    // Set sortable headers
+    const thead = document.querySelector('#covenants-table-container thead tr') || document.querySelector('#covenants-table thead tr');
+    if (thead) {
+        thead.innerHTML = `
+            ${makeSortableHeader('covenants-table', lang === 'ar' ? 'الرقم' : 'ID', 'id')}
+            ${makeSortableHeader('covenants-table', lang === 'ar' ? 'اسم الموظف' : 'Employee Name', 'employee_name')}
+            ${makeSortableHeader('covenants-table', lang === 'ar' ? 'الهاتف' : 'Phone', 'phone')}
+            ${makeSortableHeader('covenants-table', lang === 'ar' ? 'تاريخ التسجيل' : 'Reg Date', 'registration_date', 'date')}
+            ${makeSortableHeader('covenants-table', lang === 'ar' ? 'رقم المستند' : 'Doc #', 'document_number')}
+            ${makeSortableHeader('covenants-table', lang === 'ar' ? 'الرصيد الافتتاحي' : 'Opening', 'opening_balance', 'number')}
+            ${makeSortableHeader('covenants-table', lang === 'ar' ? 'إجمالي منصرف للعهدة' : 'Debit', 'debit', 'number')}
+            ${makeSortableHeader('covenants-table', lang === 'ar' ? 'إجمالي تسوية' : 'Credit', 'credit', 'number')}
+            ${makeSortableHeader('covenants-table', lang === 'ar' ? 'الرصيد الحالي' : 'Balance', 'balance', 'number')}
+            <th>${lang === 'ar' ? 'طريقة الدفع' : 'Payment'}</th>
+            <th>${lang === 'ar' ? 'البيان' : 'Statement'}</th>
+            <th class="no-print">${lang === 'ar' ? 'إجراءات' : 'Actions'}</th>
+        `;
+    }
     
     if (items.length === 0) {
         tbody.innerHTML = `<tr class="empty-row"><td colspan="12">${noItemsMsg}</td></tr>`;
@@ -5249,8 +5503,15 @@ async function loadAdvancesData() {
                 return idMatch || nameMatch || transactionMatchedIds.has(normalizeEntityId(item.id));
             });
         }
+        
+        // Save to cache
+        tableDataCache['advances-table'] = items;
+        
+        // Sort if active
+        const state = tableSortState['advances-table'];
+        const sortedItems = state && state.column ? sortData(items, state.column, state.direction, state.dataType) : items;
 
-        renderAdvancesTable(items);
+        renderAdvancesTable(sortedItems);
         if (searchLower) markTransactionMatchedRows('advance', transactionMatchedIds, entityMatchedIds, countByEntityId);
         const lang = window.i18n?.currentLang() || 'en';
         const itemWord = lang === 'ar' ? 'سلفة' : (items.length !== 1 ? 'advances' : 'advance');
@@ -5292,6 +5553,25 @@ function renderAdvancesTable(items) {
         'digital_wallet': lang === 'ar' ? 'محفظة إلكترونية' : 'Digital Wallet',
         'check': lang === 'ar' ? 'شيك' : 'Check'
     };
+    
+    // Set sortable headers
+    const thead = document.querySelector('#advances-table-container thead tr') || document.querySelector('#advances-table thead tr');
+    if (thead) {
+        thead.innerHTML = `
+            ${makeSortableHeader('advances-table', lang === 'ar' ? 'الرقم' : 'ID', 'id')}
+            ${makeSortableHeader('advances-table', lang === 'ar' ? 'اسم الموظف' : 'Employee Name', 'employee_name')}
+            ${makeSortableHeader('advances-table', lang === 'ar' ? 'الهاتف' : 'Phone', 'phone')}
+            ${makeSortableHeader('advances-table', lang === 'ar' ? 'تاريخ التسجيل' : 'Reg Date', 'registration_date', 'date')}
+            ${makeSortableHeader('advances-table', lang === 'ar' ? 'رقم المستند' : 'Doc #', 'document_number')}
+            ${makeSortableHeader('advances-table', lang === 'ar' ? 'الرصيد الافتتاحي' : 'Opening', 'opening_balance', 'number')}
+            ${makeSortableHeader('advances-table', lang === 'ar' ? 'إجمالي منصرف كسلفة' : 'Debit', 'debit', 'number')}
+            ${makeSortableHeader('advances-table', lang === 'ar' ? 'إجمالي تسديد' : 'Credit', 'credit', 'number')}
+            ${makeSortableHeader('advances-table', lang === 'ar' ? 'الرصيد الحالي' : 'Balance', 'balance', 'number')}
+            <th>${lang === 'ar' ? 'طريقة الدفع' : 'Payment'}</th>
+            <th>${lang === 'ar' ? 'البيان' : 'Statement'}</th>
+            <th class="no-print">${lang === 'ar' ? 'إجراءات' : 'Actions'}</th>
+        `;
+    }
     
     if (items.length === 0) {
         tbody.innerHTML = `<tr class="empty-row"><td colspan="12">${noItemsMsg}</td></tr>`;
