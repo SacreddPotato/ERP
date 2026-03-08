@@ -5,10 +5,10 @@ interface ModalProps {
     onClose: () => void;
     title?: string;
     children: React.ReactNode;
-    maxWidth?: 'sm' | 'md' | 'lg';
+    maxWidth?: 'sm' | 'md' | 'lg' | 'xl';
 }
 
-const widths = { sm: 'max-w-sm', md: 'max-w-md', lg: 'max-w-lg' };
+const widths = { sm: 'max-w-sm', md: 'max-w-md', lg: 'max-w-lg', xl: 'max-w-xl' };
 
 export function Modal({ open, onClose, title, children, maxWidth = 'md' }: ModalProps) {
     useEffect(() => {

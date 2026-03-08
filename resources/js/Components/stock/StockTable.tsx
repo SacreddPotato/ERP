@@ -7,6 +7,8 @@ import { Badge } from '../ui/Badge';
 import { Modal } from '../ui/Modal';
 import { toast } from '../ui/Toast';
 import api from '../../lib/api';
+import { fmtNum, fmtInt } from '../../lib/format';
+import { ExportPrintModal, ColumnDef } from '../ui/ExportPrintModal';
 import { StockItem, CATEGORIES, UNITS } from '../../types';
 
 export default function StockTable() {
@@ -19,6 +21,7 @@ export default function StockTable() {
     const [filterUnit, setFilterUnit] = useState('');
     const [sortBy, setSortBy] = useState('item_code');
     const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+    const [showExport, setShowExport] = useState(false);
 
     // Inline edit state
     const [editingCode, setEditingCode] = useState<string | null>(null);
@@ -91,19 +94,22 @@ export default function StockTable() {
         } catch (e: any) { toast(e.response?.data?.message || t('msg_wrong_password'), 'error'); }
     };
 
-    const exportCsv = async () => {
-        try {
-            const res = await api.get('/api/stock/export', { params: { search, category: filterCategory, unit: filterUnit } });
-            const blob = new Blob([res.data.csv], { type: 'text/csv' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a'); a.href = url; a.download = `stock_${factory}.csv`; a.click();
-            URL.revokeObjectURL(url);
-            toast(t('msg_exported'), 'success');
-        } catch { toast(t('sync_failed'), 'error'); }
-    };
-
     const catOptions = [{ value: '', label: t('all_categories') }, ...CATEGORIES.map(c => ({ value: c.value, label: t(c.labelKey) }))];
     const unitOptions = [{ value: '', label: t('all_units') }, ...UNITS.map(u => ({ value: u.value, label: t(u.labelKey) }))];
+
+    const exportColumns: ColumnDef[] = [
+        { key: 'item_code', label: t('th_id') },
+        { key: 'name', label: t('th_name') },
+        { key: 'category', label: t('th_category') },
+        { key: 'unit', label: t('th_unit') },
+        { key: 'supplier', label: t('th_supplier'), render: (v) => v || '' },
+        { key: 'starting_balance', label: t('th_starting'), render: (v) => fmtInt(v) },
+        { key: 'total_incoming', label: t('th_in'), render: (v) => fmtInt(v) },
+        { key: 'total_outgoing', label: t('th_out'), render: (v) => fmtInt(v) },
+        { key: 'net_stock', label: t('th_net_stock'), render: (v) => fmtInt(v) },
+        { key: 'unit_price', label: t('th_price'), render: (v) => fmtNum(v) },
+        { key: 'min_stock', label: t('th_min_stock'), render: (v) => fmtInt(v) },
+    ];
 
     const SortHeader = ({ col, children }: { col: string; children: React.ReactNode }) => (
         <th
@@ -128,7 +134,7 @@ export default function StockTable() {
                             <div key={item.item_code} className="flex items-center gap-3 text-sm">
                                 <Badge variant="warning">{item.item_code}</Badge>
                                 <span className="font-medium text-slate-800 dark:text-slate-200">{item.name}</span>
-                                <span className="text-slate-500 dark:text-slate-400">{t('notification_current')} {item.net_stock} | {t('notification_min')} {item.min_stock}</span>
+                                <span className="text-slate-500 dark:text-slate-400">{t('notification_current')} {fmtInt(item.net_stock)} | {t('notification_min')} {fmtInt(item.min_stock)}</span>
                             </div>
                         ))}
                     </div>
@@ -148,7 +154,8 @@ export default function StockTable() {
                         <Select options={unitOptions} value={filterUnit} onChange={(e) => setFilterUnit(e.target.value)} />
                     </div>
                     <Button variant="secondary" onClick={fetchItems} loading={loading}>{t('btn_refresh')}</Button>
-                    <Button variant="ghost" onClick={exportCsv}>{t('btn_export')}</Button>
+                    <Button variant="ghost" onClick={() => setShowExport(true)}>{t('btn_export')}</Button>
+                    <Button variant="ghost" onClick={() => setShowExport(true)}>{t('btn_print')}</Button>
                 </div>
             </Card>
 
@@ -184,23 +191,23 @@ export default function StockTable() {
                                     <td className="px-4 py-3.5 text-sm text-slate-600 dark:text-slate-400">{item.category}</td>
                                     <td className="px-4 py-3.5 text-sm text-slate-600 dark:text-slate-400">{item.unit}</td>
                                     <td className="px-4 py-3.5 text-sm text-slate-600 dark:text-slate-400">{item.supplier || '-'}</td>
-                                    <td className="px-4 py-3.5 text-sm text-slate-600 dark:text-slate-400 text-center">{item.starting_balance}</td>
-                                    <td className="px-4 py-3.5 text-sm text-emerald-600 font-medium text-center">{item.total_incoming}</td>
-                                    <td className="px-4 py-3.5 text-sm text-red-500 font-medium text-center">{item.total_outgoing}</td>
+                                    <td className="px-4 py-3.5 text-sm text-slate-600 dark:text-slate-400 text-center">{fmtInt(item.starting_balance)}</td>
+                                    <td className="px-4 py-3.5 text-sm text-emerald-600 font-medium text-center">{fmtInt(item.total_incoming)}</td>
+                                    <td className="px-4 py-3.5 text-sm text-red-500 font-medium text-center">{fmtInt(item.total_outgoing)}</td>
                                     <td className="px-4 py-3.5 text-sm font-bold text-slate-900 dark:text-slate-100 text-center">
                                         {editingCode === item.item_code
-                                            ? item.net_stock
-                                            : <span className={item.net_stock <= item.min_stock && item.min_stock > 0 ? 'text-red-600' : ''}>{item.net_stock}</span>}
+                                            ? fmtInt(item.net_stock)
+                                            : <span className={item.net_stock <= item.min_stock && item.min_stock > 0 ? 'text-red-600' : ''}>{fmtInt(item.net_stock)}</span>}
                                     </td>
                                     <td className="px-4 py-3.5 text-sm text-slate-600 dark:text-slate-400 text-center">
                                         {editingCode === item.item_code
                                             ? <input type="number" className="w-20 border rounded-lg px-2 py-1 text-sm dark:bg-slate-700 dark:border-slate-600 dark:text-slate-100" value={editData.unit_price} onChange={(e) => setEditData({ ...editData, unit_price: e.target.value })} />
-                                            : Number(item.unit_price).toFixed(2)}
+                                            : fmtNum(item.unit_price)}
                                     </td>
                                     <td className="px-4 py-3.5 text-sm text-slate-600 dark:text-slate-400 text-center">
                                         {editingCode === item.item_code
                                             ? <input type="number" className="w-16 border rounded-lg px-2 py-1 text-sm dark:bg-slate-700 dark:border-slate-600 dark:text-slate-100" value={editData.min_stock} onChange={(e) => setEditData({ ...editData, min_stock: e.target.value })} />
-                                            : item.min_stock}
+                                            : fmtInt(item.min_stock)}
                                     </td>
                                     <td className="px-4 py-3.5">
                                         <div className="flex items-center gap-1.5">
@@ -237,10 +244,20 @@ export default function StockTable() {
                 )}
             </Card>
 
+            <ExportPrintModal
+                open={showExport}
+                onClose={() => setShowExport(false)}
+                title={`Stock - ${factory}`}
+                columns={exportColumns}
+                data={sortedItems}
+                filename={`stock_${factory}`}
+                t={t}
+            />
+
             {/* Delete Modal */}
             <Modal open={!!deleteTarget} onClose={() => { setDeleteTarget(null); setDeletePassword(''); }} title={t('delete_confirmation_title')}>
                 <p className="text-sm text-slate-600 dark:text-slate-400 mb-4">{t('delete_confirmation_message')}</p>
-                {deleteTarget && <p className="text-sm font-medium mb-4">{deleteTarget.code} - {deleteTarget.name}</p>}
+                {deleteTarget && <p className="text-sm font-medium dark:text-slate-200 mb-4">{deleteTarget.code} - {deleteTarget.name}</p>}
                 <Input type="password" value={deletePassword} onChange={(e) => setDeletePassword(e.target.value)} placeholder={t('placeholder_delete_password')} label={t('delete_password_label')} />
                 <div className="flex justify-end gap-3 mt-5">
                     <Button variant="secondary" onClick={() => { setDeleteTarget(null); setDeletePassword(''); }}>{t('btn_cancel')}</Button>

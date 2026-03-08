@@ -6,6 +6,7 @@ import { Input, Select, Textarea } from '../ui/Input';
 import { Badge } from '../ui/Badge';
 import { toast } from '../ui/Toast';
 import api from '../../lib/api';
+import { fmtNum, fmtInt } from '../../lib/format';
 import { CATEGORIES, UNITS, FACTORIES, DOCUMENT_TYPES, StockItem } from '../../types';
 
 export default function StockManager() {
@@ -152,9 +153,9 @@ export default function StockManager() {
                         </div>
                         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
                             <div><span className="text-slate-500 dark:text-slate-400">{t('info_category')}</span> <span className="font-medium">{existingItem.category}</span></div>
-                            <div><span className="text-slate-500 dark:text-slate-400">{t('info_current_stock')}</span> <span className="font-bold text-indigo-700 dark:text-indigo-400">{existingItem.net_stock}</span></div>
-                            <div><span className="text-slate-500 dark:text-slate-400">{t('info_price')}</span> <span className="font-medium">{Number(existingItem.unit_price).toFixed(2)}</span></div>
-                            <div><span className="text-slate-500 dark:text-slate-400">{t('info_min_stock')}</span> <span className="font-medium">{existingItem.min_stock}</span></div>
+                            <div><span className="text-slate-500 dark:text-slate-400">{t('info_current_stock')}</span> <span className="font-bold text-indigo-700 dark:text-indigo-400">{fmtInt(existingItem.net_stock)}</span></div>
+                            <div><span className="text-slate-500 dark:text-slate-400">{t('info_price')}</span> <span className="font-medium dark:text-slate-100">{fmtNum(existingItem.unit_price)}</span></div>
+                            <div><span className="text-slate-500 dark:text-slate-400">{t('info_min_stock')}</span> <span className="font-medium dark:text-slate-100">{fmtInt(existingItem.min_stock)}</span></div>
                         </div>
                     </div>
                 )}

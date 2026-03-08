@@ -6,7 +6,9 @@ import { Input, Select } from '../ui/Input';
 import { Badge } from '../ui/Badge';
 import { Modal } from '../ui/Modal';
 import { toast } from '../ui/Toast';
+import { ExportPrintModal, ColumnDef } from '../ui/ExportPrintModal';
 import api from '../../lib/api';
+import { fmtNum, fmtInt, fmtDate, fmtDateTime } from '../../lib/format';
 import { TransactionLog, LedgerLog, FACTORIES } from '../../types';
 
 export default function TransactionLogPage() {
@@ -36,6 +38,9 @@ export default function TransactionLogPage() {
     const [stockSortDir, setStockSortDir] = useState<'asc' | 'desc'>('desc');
     const [ledgerSortBy, setLedgerSortBy] = useState('logged_at');
     const [ledgerSortDir, setLedgerSortDir] = useState<'asc' | 'desc'>('desc');
+
+    // Export/Print modal
+    const [showExport, setShowExport] = useState(false);
 
     // Reverse modal
     const [reverseTarget, setReverseTarget] = useState<{ id: number; source: 'stock' | 'ledger' } | null>(null);
@@ -186,6 +191,31 @@ export default function TransactionLogPage() {
 
     const factoryOptions = [{ value: '', label: t('all_locations') }, ...FACTORIES.map(f => ({ value: f.value, label: t(f.labelKey) }))];
 
+    const stockExportColumns: ColumnDef[] = [
+        { key: 'logged_at', label: t('th_logged_at'), render: (v) => fmtDateTime(v) },
+        { key: 'transaction_date', label: t('th_trans_date'), render: (v) => fmtDate(v) },
+        { key: 'item_code', label: t('th_item_id') },
+        { key: 'item_name', label: t('th_item_name') },
+        { key: 'transaction_type', label: t('th_type') },
+        { key: 'quantity', label: t('th_quantity'), render: (v) => fmtInt(v) },
+        { key: 'previous_stock', label: t('th_prev_stock'), render: (v) => fmtInt(v) },
+        { key: 'new_stock', label: t('th_new_stock'), render: (v) => fmtInt(v) },
+        { key: 'factory', label: t('th_location') },
+        { key: 'notes', label: t('th_notes'), render: (v) => v || '' },
+    ];
+
+    const ledgerExportColumns: ColumnDef[] = [
+        { key: 'logged_at', label: t('th_logged_at'), render: (v) => fmtDateTime(v) },
+        { key: 'transaction_date', label: t('th_trans_date'), render: (v) => fmtDate(v) },
+        { key: 'ledger_type', label: t('th_type') },
+        { key: 'entity_code', label: t('th_id') },
+        { key: 'entity_name', label: t('th_name') },
+        { key: 'debit', label: t('th_debit'), render: (v) => fmtNum(v) },
+        { key: 'credit', label: t('th_credit'), render: (v) => fmtNum(v) },
+        { key: 'new_balance', label: t('th_balance'), render: (v) => fmtNum(v) },
+        { key: 'statement', label: t('th_statement'), render: (v) => v || '' },
+    ];
+
     return (
         <div className="space-y-6">
             {/* Source Toggle */}
@@ -283,6 +313,8 @@ export default function TransactionLogPage() {
                 </div>
                 <div className="flex justify-end gap-3 mt-4 pt-4 border-t border-slate-200 dark:border-slate-700">
                     <Button variant="ghost" onClick={clearFilters}>{t('btn_clear')}</Button>
+                    <Button variant="ghost" onClick={() => setShowExport(true)}>{t('btn_export')}</Button>
+                    <Button variant="ghost" onClick={() => setShowExport(true)}>{t('btn_print')}</Button>
                     <Button onClick={fetchLogs} loading={loading}>{t('btn_apply')}</Button>
                 </div>
             </Card>
@@ -310,14 +342,14 @@ export default function TransactionLogPage() {
                             <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
                                 {filteredStockLogs.map((log) => (
                                     <tr key={log.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-700/50 transition-colors">
-                                        <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400 whitespace-nowrap">{log.logged_at?.replace('T', ' ').slice(0, 19)}</td>
-                                        <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400 whitespace-nowrap">{log.transaction_date || '-'}</td>
+                                        <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400 whitespace-nowrap">{fmtDateTime(log.logged_at)}</td>
+                                        <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400 whitespace-nowrap">{fmtDate(log.transaction_date)}</td>
                                         <td className="px-4 py-3 text-sm font-medium text-indigo-600">{log.item_code}</td>
                                         <td className="px-4 py-3 text-sm text-slate-900 dark:text-slate-100">{log.item_name}</td>
                                         <td className="px-4 py-3"><Badge>{log.transaction_type}</Badge></td>
-                                        <td className="px-4 py-3 text-sm font-medium text-center">{log.quantity}</td>
-                                        <td className="px-4 py-3 text-sm text-slate-500 dark:text-slate-400 text-center">{log.previous_stock}</td>
-                                        <td className="px-4 py-3 text-sm font-bold text-center">{log.new_stock}</td>
+                                        <td className="px-4 py-3 text-sm font-medium dark:text-slate-100 text-center">{fmtInt(log.quantity)}</td>
+                                        <td className="px-4 py-3 text-sm text-slate-500 dark:text-slate-400 text-center">{fmtInt(log.previous_stock)}</td>
+                                        <td className="px-4 py-3 text-sm font-bold dark:text-slate-100 text-center">{fmtInt(log.new_stock)}</td>
                                         <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400">{log.factory}</td>
                                         <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400 max-w-[200px] truncate">{log.notes || '-'}</td>
                                         <td className="px-4 py-3">
@@ -363,14 +395,14 @@ export default function TransactionLogPage() {
                             <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
                                 {filteredLedgerLogs.map((log) => (
                                     <tr key={log.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-700/50 transition-colors">
-                                        <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400 whitespace-nowrap">{log.logged_at?.replace('T', ' ').slice(0, 19)}</td>
-                                        <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400 whitespace-nowrap">{log.transaction_date || '-'}</td>
+                                        <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400 whitespace-nowrap">{fmtDateTime(log.logged_at)}</td>
+                                        <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400 whitespace-nowrap">{fmtDate(log.transaction_date)}</td>
                                         <td className="px-4 py-3"><Badge variant="info">{log.ledger_type}</Badge></td>
                                         <td className="px-4 py-3 text-sm font-medium text-indigo-600">{log.entity_code}</td>
                                         <td className="px-4 py-3 text-sm text-slate-900 dark:text-slate-100">{log.entity_name}</td>
-                                        <td className="px-4 py-3 text-sm text-emerald-600 font-medium">{Number(log.debit).toFixed(2)}</td>
-                                        <td className="px-4 py-3 text-sm text-red-500 font-medium">{Number(log.credit).toFixed(2)}</td>
-                                        <td className="px-4 py-3 text-sm font-bold">{Number(log.new_balance).toFixed(2)}</td>
+                                        <td className="px-4 py-3 text-sm text-emerald-600 font-medium">{fmtNum(log.debit)}</td>
+                                        <td className="px-4 py-3 text-sm text-red-500 font-medium">{fmtNum(log.credit)}</td>
+                                        <td className="px-4 py-3 text-sm font-bold dark:text-slate-100">{fmtNum(log.new_balance)}</td>
                                         <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400 max-w-[200px] truncate">{log.statement || '-'}</td>
                                         <td className="px-4 py-3">
                                             <Button size="xs" variant="ghost" onClick={() => setReverseTarget({ id: log.id, source: 'ledger' })} className="text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-900/20">
@@ -392,6 +424,17 @@ export default function TransactionLogPage() {
                     )}
                 </Card>
             )}
+
+            {/* Export/Print Modal */}
+            <ExportPrintModal
+                open={showExport}
+                onClose={() => setShowExport(false)}
+                title={logSource === 'stock' ? t('log_source_stock') : t('log_source_all_ledger')}
+                columns={logSource === 'stock' ? stockExportColumns : ledgerExportColumns}
+                data={logSource === 'stock' ? filteredStockLogs : filteredLedgerLogs}
+                filename={`transactions_${logSource}`}
+                t={t}
+            />
 
             {/* Reverse Confirmation Modal */}
             <Modal open={!!reverseTarget} onClose={() => setReverseTarget(null)} title={t('confirm_reverse_title')}>

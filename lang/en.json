@@ -387,11 +387,12 @@
     "placeholder_delete_password": "Enter deletion password...",
     "btn_confirm_delete": "Confirm Delete",
 
-    "export_options": "Export Options",
-    "select_columns": "Select columns to export:",
+    "export_options": "Export / Print",
+    "select_columns": "Select columns to include:",
     "select_all": "Select All",
     "deselect_all": "Deselect All",
     "btn_export_selected": "Export Selected",
+    "btn_export_excel": "Export Excel",
 
     "search_mode_and": "AND",
     "search_mode_or": "OR",

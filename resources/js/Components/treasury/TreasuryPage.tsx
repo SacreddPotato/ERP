@@ -6,8 +6,10 @@ import { Input, Select, Textarea } from '../ui/Input';
 import { StatCard } from '../ui/StatCard';
 import { Badge } from '../ui/Badge';
 import { Modal } from '../ui/Modal';
+import { ExportPrintModal, ColumnDef } from '../ui/ExportPrintModal';
 import { toast } from '../ui/Toast';
 import api from '../../lib/api';
+import { fmtNum, fmtDate, fmtDateTime, escapeHtml } from '../../lib/format';
 import { TreasurySummary, LedgerEntity, LedgerTotals, LedgerLog, PAYMENT_METHODS } from '../../types';
 
 export default function TreasuryPage() {
@@ -53,6 +55,7 @@ export default function TreasuryPage() {
     const [deletePassword, setDeletePassword] = useState('');
     const [showResetModal, setShowResetModal] = useState(false);
     const [resetPassword, setResetPassword] = useState('');
+    const [showExport, setShowExport] = useState(false);
 
     const fetchData = useCallback(async () => {
         setLoading(true);
@@ -207,6 +210,38 @@ export default function TreasuryPage() {
     };
 
     const paymentOptions = PAYMENT_METHODS.map(p => ({ value: p.value, label: t(p.labelKey) }));
+
+    const exportColumns: ColumnDef[] = [
+        { key: 'account_number', label: t('th_account_number') },
+        { key: 'account_name', label: t('th_account_name') },
+        { key: 'opening_balance', label: t('th_opening_balance'), render: (v: any) => fmtNum(v) },
+        { key: 'debit', label: t('th_debit'), render: (v: any) => fmtNum(v) },
+        { key: 'credit', label: t('th_credit'), render: (v: any) => fmtNum(v) },
+        { key: 'balance', label: t('th_balance'), render: (v: any) => fmtNum(v) },
+    ];
+
+    const printEntityTx = (code: string, name: string, txData: LedgerLog[]) => {
+        const w = window.open('', '_blank');
+        if (!w) return;
+        let h = '<!DOCTYPE html><html><head><meta charset="utf-8">';
+        h += `<title>${escapeHtml(code)} - ${escapeHtml(name)}</title>`;
+        h += '<style>body{font-family:Arial,sans-serif;margin:20px}h2{margin-bottom:4px;font-size:18px}.meta{font-size:12px;color:#666;margin-bottom:12px}table{width:100%;border-collapse:collapse}th,td{border:1px solid #333;padding:6px 10px;font-size:12px;text-align:left}th{background:#f0f0f0;font-weight:bold}tr:nth-child(even){background:#fafafa}@media print{body{margin:10px}}</style>';
+        h += '</head><body>';
+        h += `<h2>${escapeHtml(code)} &mdash; ${escapeHtml(name)}</h2>`;
+        h += `<p class="meta">${txData.length} transactions &mdash; ${new Date().toLocaleDateString()}</p>`;
+        h += '<table><thead><tr>';
+        [t('th_trans_date'), t('th_logged_at'), t('th_type'), t('th_debit'), t('th_credit'), t('th_balance'), t('th_payment_method'), t('th_statement')].forEach(label => { h += `<th>${escapeHtml(label)}</th>`; });
+        h += '</tr></thead><tbody>';
+        txData.forEach(tx => {
+            h += `<tr><td>${fmtDate(tx.transaction_date)}</td><td>${fmtDateTime(tx.logged_at)}</td><td>${escapeHtml(tx.transaction_type || '')}</td><td>${fmtNum(tx.debit)}</td><td>${fmtNum(tx.credit)}</td><td>${fmtNum(tx.new_balance)}</td><td>${tx.payment_method ? escapeHtml(t(`payment_${tx.payment_method}`)) : '-'}</td><td>${escapeHtml(tx.statement || '-')}</td></tr>`;
+        });
+        h += '</tbody></table></body></html>';
+        w.document.write(h);
+        w.document.close();
+        w.focus();
+        setTimeout(() => w.print(), 250);
+    };
+
     const isInitialized = summary?.config?.initialized;
 
     const TxSortHeader = ({ col, children }: { col: string; children: React.ReactNode }) => (
@@ -260,11 +295,11 @@ export default function TreasuryPage() {
             {isInitialized && summary && (
                 <>
                     <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
-                        <StatCard label={t('starting_capital')} value={summary.starting_capital.toFixed(2)} color="indigo" />
-                        <StatCard label={t('total_debit')} value={summary.total_debit.toFixed(2)} color="green" />
-                        <StatCard label={t('total_credit')} value={summary.total_credit.toFixed(2)} color="red" />
-                        <StatCard label={t('net_change')} value={summary.net_change.toFixed(2)} color="amber" />
-                        <StatCard label={t('current_treasury_position')} value={summary.current_position.toFixed(2)} color="purple" />
+                        <StatCard label={t('starting_capital')} value={fmtNum(summary.starting_capital)} color="indigo" />
+                        <StatCard label={t('total_debit')} value={fmtNum(summary.total_debit)} color="green" />
+                        <StatCard label={t('total_credit')} value={fmtNum(summary.total_credit)} color="red" />
+                        <StatCard label={t('net_change')} value={fmtNum(summary.net_change)} color="amber" />
+                        <StatCard label={t('current_treasury_position')} value={fmtNum(summary.current_position)} color="purple" />
                     </div>
 
                     <div className="flex items-center gap-3 bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700 px-5 py-3">
@@ -313,10 +348,14 @@ export default function TreasuryPage() {
 
                     {/* Accounts Table */}
                     <Card padding="sm">
-                        <div className="px-4 pt-4 pb-3 flex items-center justify-between">
+                        <div className="px-4 pt-4 pb-3 flex items-center justify-between gap-3">
                             <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-200">{t('treasury_list')}</h3>
-                            <div className="w-64">
-                                <Input placeholder={t('placeholder_search')} value={search} onChange={(e) => setSearch(e.target.value)} />
+                            <div className="flex items-center gap-2">
+                                <Button variant="ghost" size="xs" onClick={() => setShowExport(true)}>{t('btn_export')}</Button>
+                                <Button variant="ghost" size="xs" onClick={() => setShowExport(true)}>{t('btn_print')}</Button>
+                                <div className="w-64">
+                                    <Input placeholder={t('placeholder_search')} value={search} onChange={(e) => setSearch(e.target.value)} />
+                                </div>
                             </div>
                         </div>
                         <div className="overflow-x-auto">
@@ -351,12 +390,12 @@ export default function TreasuryPage() {
                                                         </button>
                                                     </td>
                                                     <td className="px-4 py-3.5 text-sm font-medium text-slate-800 dark:text-slate-200">{entity.account_name}</td>
-                                                    <td className="px-4 py-3.5 text-sm text-slate-500 dark:text-slate-400 tabular-nums">{Number(entity.opening_balance).toFixed(2)}</td>
-                                                    <td className="px-4 py-3.5 text-sm text-emerald-600 font-medium tabular-nums">{Number(entity.debit).toFixed(2)}</td>
-                                                    <td className="px-4 py-3.5 text-sm text-red-500 font-medium tabular-nums">{Number(entity.credit).toFixed(2)}</td>
+                                                    <td className="px-4 py-3.5 text-sm text-slate-500 dark:text-slate-400 tabular-nums">{fmtNum(entity.opening_balance)}</td>
+                                                    <td className="px-4 py-3.5 text-sm text-emerald-600 font-medium tabular-nums">{fmtNum(entity.debit)}</td>
+                                                    <td className="px-4 py-3.5 text-sm text-red-500 font-medium tabular-nums">{fmtNum(entity.credit)}</td>
                                                     <td className="px-4 py-3.5">
                                                         <span className={`text-sm font-bold tabular-nums ${balance >= 0 ? 'text-slate-900 dark:text-slate-100' : 'text-red-600'}`}>
-                                                            {balance.toFixed(2)}
+                                                            {fmtNum(balance)}
                                                         </span>
                                                     </td>
                                                     <td className="px-4 py-3.5">
@@ -410,12 +449,12 @@ export default function TreasuryPage() {
                                                                         <tbody className="divide-y divide-slate-100 dark:divide-slate-700 bg-white dark:bg-slate-800">
                                                                             {sortedTransactions.map((tx) => (
                                                                                 <tr key={tx.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-700/50 transition-colors">
-                                                                                    <td className="px-3 py-2.5 text-xs text-slate-600 dark:text-slate-400 whitespace-nowrap">{tx.transaction_date || '-'}</td>
-                                                                                    <td className="px-3 py-2.5 text-xs text-slate-400 dark:text-slate-500 whitespace-nowrap">{tx.logged_at?.replace('T', ' ').slice(0, 19) || '-'}</td>
+                                                                                    <td className="px-3 py-2.5 text-xs text-slate-600 dark:text-slate-400 whitespace-nowrap">{fmtDate(tx.transaction_date)}</td>
+                                                                                    <td className="px-3 py-2.5 text-xs text-slate-400 dark:text-slate-500 whitespace-nowrap">{fmtDateTime(tx.logged_at)}</td>
                                                                                     <td className="px-3 py-2.5 text-xs"><Badge>{tx.transaction_type}</Badge></td>
-                                                                                    <td className="px-3 py-2.5 text-xs text-emerald-600 font-medium tabular-nums">{Number(tx.debit).toFixed(2)}</td>
-                                                                                    <td className="px-3 py-2.5 text-xs text-red-500 font-medium tabular-nums">{Number(tx.credit).toFixed(2)}</td>
-                                                                                    <td className="px-3 py-2.5 text-xs font-bold tabular-nums">{Number(tx.new_balance).toFixed(2)}</td>
+                                                                                    <td className="px-3 py-2.5 text-xs text-emerald-600 font-medium tabular-nums">{fmtNum(tx.debit)}</td>
+                                                                                    <td className="px-3 py-2.5 text-xs text-red-500 font-medium tabular-nums">{fmtNum(tx.credit)}</td>
+                                                                                    <td className="px-3 py-2.5 text-xs font-bold dark:text-slate-100 tabular-nums">{fmtNum(tx.new_balance)}</td>
                                                                                     <td className="px-3 py-2.5 text-xs text-slate-500 dark:text-slate-400">{tx.payment_method ? t(`payment_${tx.payment_method}`) : '-'}</td>
                                                                                     <td className="px-3 py-2.5 text-xs text-slate-500 dark:text-slate-400 max-w-[200px] truncate">{tx.statement || '-'}</td>
                                                                                 </tr>
@@ -425,6 +464,16 @@ export default function TreasuryPage() {
                                                                             )}
                                                                         </tbody>
                                                                     </table>
+                                                                )}
+                                                                {!txLoading && sortedTransactions.length > 0 && (
+                                                                    <div className="px-3 py-2 border-t border-slate-200 dark:border-slate-600 flex justify-end bg-slate-50/50 dark:bg-slate-700/30">
+                                                                        <Button size="xs" variant="ghost" onClick={() => printEntityTx(entity.account_number, entity.account_name ?? '', sortedTransactions)}>
+                                                                            <svg className="w-3.5 h-3.5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                                                                <path strokeLinecap="round" strokeLinejoin="round" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+                                                                            </svg>
+                                                                            {t('btn_print')}
+                                                                        </Button>
+                                                                    </div>
                                                                 )}
                                                             </div>
                                                         </td>
@@ -442,6 +491,16 @@ export default function TreasuryPage() {
                     </Card>
                 </>
             )}
+
+            <ExportPrintModal
+                open={showExport}
+                onClose={() => setShowExport(false)}
+                title={t('treasury_list')}
+                columns={exportColumns}
+                data={entities}
+                filename="treasury_accounts"
+                t={t}
+            />
 
             {/* Edit Modal */}
             <Modal open={!!editTarget} onClose={() => setEditTarget(null)} title={t('btn_edit')}>
