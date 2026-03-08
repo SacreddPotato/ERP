@@ -262,7 +262,7 @@ export default function TreasuryPage() {
                                                         <Button size="xs" variant="ghost" onClick={() => viewTransactions(entity.account_number)}>
                                                             {viewingCode === entity.account_number ? t('btn_close') : t('tab_transactions')}
                                                         </Button>
-                                                        <Button size="xs" variant="ghost" onClick={() => setDeleteTarget({ code: entity.account_number, name: entity.account_name })} className="text-red-500 hover:text-red-700 hover:bg-red-50">{t('btn_delete')}</Button>
+                                                        <Button size="xs" variant="ghost" onClick={() => setDeleteTarget({ code: entity.account_number, name: entity.account_name ?? '' })} className="text-red-500 hover:text-red-700 hover:bg-red-50">{t('btn_delete')}</Button>
                                                     </div>
                                                 </td>
                                             </tr>

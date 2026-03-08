@@ -2,11 +2,13 @@
 
 namespace Tests\Feature;
 
-// use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Foundation\Testing\WithoutVite;
 use Tests\TestCase;
 
 class ExampleTest extends TestCase
 {
+    use WithoutVite;
+
     /**
      * A basic test example.
      */
