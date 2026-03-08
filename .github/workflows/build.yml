@@ -5,6 +5,9 @@ on:
     tags:
       - 'v*'
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: windows-latest
@@ -56,16 +59,23 @@ jobs:
       - name: Build NativePHP Electron app
         run: php artisan native:build win
 
+      - name: Package build output
+        run: |
+          Compress-Archive -Path dist\win-unpacked\* -DestinationPath dist\EnterprisFlow-${{ github.ref_name }}-win-x64.zip
+        shell: pwsh
+
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
           name: enterprisflow-windows
-          path: dist/*.exe
+          path: |
+            dist/win-unpacked/laravel.exe
+            dist/EnterprisFlow-*.zip
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/*.exe
+          files: |
+            dist/win-unpacked/laravel.exe
+            dist/EnterprisFlow-*.zip
           generate_release_notes: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
