@@ -31,9 +31,18 @@ class FirebaseSyncService
         $credentialsPath = config('firebase.credentials');
         $projectId = config('firebase.project_id');
 
+        if (!$credentialsPath || !file_exists($credentialsPath)) {
+            throw new \RuntimeException('Firebase credentials file not found: ' . ($credentialsPath ?: '(not configured)'));
+        }
+
+        $keyData = json_decode(file_get_contents($credentialsPath), true);
+        if (!is_array($keyData) || empty($keyData['client_email'])) {
+            throw new \RuntimeException('Firebase credentials file is invalid or missing the client_email field.');
+        }
+
         $creds = new ServiceAccountCredentials(
             ['https://www.googleapis.com/auth/datastore'],
-            json_decode(file_get_contents($credentialsPath), true)
+            $keyData
         );
         $token = $creds->fetchAuthToken();
         $this->accessToken = $token['access_token'];

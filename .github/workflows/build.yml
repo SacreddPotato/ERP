@@ -54,9 +54,21 @@ jobs:
         shell: bash
 
       - name: Write Firebase credentials
-        run: |
-          echo '${{ secrets.FIREBASE_CREDENTIALS }}' > firebase-service-account.json
+        env:
+          FIREBASE_CREDS_JSON: ${{ secrets.FIREBASE_CREDENTIALS }}
+        run: printenv FIREBASE_CREDS_JSON > firebase-service-account.json
         shell: bash
+
+      - name: Validate Firebase credentials
+        run: |
+          php -r "
+            \$json = json_decode(file_get_contents('firebase-service-account.json'), true);
+            if (!is_array(\$json) || empty(\$json['client_email'])) {
+              echo 'ERROR: Firebase credentials file is missing or invalid (no client_email)' . PHP_EOL;
+              exit(1);
+            }
+            echo 'OK: client_email = ' . \$json['client_email'] . PHP_EOL;
+          "
 
       - name: Build NativePHP Electron app
         run: php artisan native:build win
