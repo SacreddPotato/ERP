@@ -141,7 +141,7 @@ export default function TransactionLogPage() {
     const StockSortHeader = ({ col, children }: { col: string; children: React.ReactNode }) => (
         <th
             onClick={() => toggleStockSort(col)}
-            className="px-4 py-3.5 text-start text-xs font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:text-gray-900 select-none whitespace-nowrap"
+            className="px-4 py-3.5 text-start text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider cursor-pointer hover:text-slate-900 dark:hover:text-slate-200 select-none whitespace-nowrap"
         >
             <span className="inline-flex items-center gap-1">
                 {children}
@@ -153,7 +153,7 @@ export default function TransactionLogPage() {
     const LedgerSortHeader = ({ col, children }: { col: string; children: React.ReactNode }) => (
         <th
             onClick={() => toggleLedgerSort(col)}
-            className="px-4 py-3.5 text-start text-xs font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:text-gray-900 select-none whitespace-nowrap"
+            className="px-4 py-3.5 text-start text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider cursor-pointer hover:text-slate-900 dark:hover:text-slate-200 select-none whitespace-nowrap"
         >
             <span className="inline-flex items-center gap-1">
                 {children}
@@ -208,20 +208,20 @@ export default function TransactionLogPage() {
             <Card>
                 {/* Multi-tag search */}
                 <div className="mb-4">
-                    <label className="block text-sm font-medium text-gray-700 mb-1.5">{t('filter_keyword')}</label>
+                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">{t('filter_keyword')}</label>
                     <div className="flex items-center gap-3">
                         <div className="flex-1 relative">
-                            <div className="flex flex-wrap items-center gap-1.5 min-h-[42px] px-3 py-2 border border-gray-200 rounded-xl bg-white focus-within:ring-2 focus-within:ring-indigo-500/20 focus-within:border-indigo-400 transition-all">
+                            <div className="flex flex-wrap items-center gap-1.5 min-h-[42px] px-3 py-2 border border-slate-200 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-800 focus-within:ring-2 focus-within:ring-indigo-500/20 focus-within:border-indigo-400 transition-all">
                                 {tags.map((tag, i) => (
                                     <span
                                         key={i}
-                                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-indigo-50 text-indigo-700 text-xs font-medium border border-indigo-100"
+                                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-400 text-xs font-medium border border-indigo-100 dark:border-indigo-800"
                                     >
                                         {tag}
                                         <button
                                             type="button"
                                             onClick={() => removeTag(i)}
-                                            className="ml-0.5 text-indigo-400 hover:text-indigo-700 transition-colors"
+                                            className="ml-0.5 text-indigo-400 dark:text-indigo-500 hover:text-indigo-700 dark:hover:text-indigo-300 transition-colors"
                                             aria-label={t('remove_tag')}
                                         >
                                             &times;
@@ -234,21 +234,21 @@ export default function TransactionLogPage() {
                                     onChange={(e) => setTagInput(e.target.value)}
                                     onKeyDown={handleTagKeyDown}
                                     placeholder={tags.length === 0 ? t('placeholder_keyword_search') : ''}
-                                    className="flex-1 min-w-[120px] border-0 p-0 text-sm text-gray-700 placeholder-gray-400 focus:ring-0 focus:outline-none bg-transparent"
+                                    className="flex-1 min-w-[120px] border-0 p-0 text-sm text-slate-700 dark:text-slate-200 placeholder-slate-400 dark:placeholder-slate-500 focus:ring-0 focus:outline-none bg-transparent"
                                 />
                             </div>
                         </div>
                         {/* AND/OR toggle */}
                         <div className="flex items-center gap-1.5 shrink-0">
-                            <span className="text-xs text-gray-500 font-medium">{t('search_mode_label')}:</span>
-                            <div className="flex rounded-lg overflow-hidden border border-gray-200">
+                            <span className="text-xs text-slate-500 dark:text-slate-400 font-medium">{t('search_mode_label')}:</span>
+                            <div className="flex rounded-lg overflow-hidden border border-slate-200 dark:border-slate-600">
                                 <button
                                     type="button"
                                     onClick={() => setSearchMode('AND')}
                                     className={`px-3 py-1.5 text-xs font-semibold transition-all ${
                                         searchMode === 'AND'
                                             ? 'bg-indigo-600 text-white'
-                                            : 'bg-white text-gray-600 hover:bg-gray-50'
+                                            : 'bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-600'
                                     }`}
                                 >
                                     {t('search_mode_and')}
@@ -259,7 +259,7 @@ export default function TransactionLogPage() {
                                     className={`px-3 py-1.5 text-xs font-semibold transition-all ${
                                         searchMode === 'OR'
                                             ? 'bg-indigo-600 text-white'
-                                            : 'bg-white text-gray-600 hover:bg-gray-50'
+                                            : 'bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-600'
                                     }`}
                                 >
                                     {t('search_mode_or')}
@@ -281,7 +281,7 @@ export default function TransactionLogPage() {
                         <Input label={t('filter_document_number')} value={filterDocNumber} onChange={(e) => setFilterDocNumber(e.target.value)} placeholder={t('placeholder_search_doc_number')} />
                     )}
                 </div>
-                <div className="flex justify-end gap-3 mt-4 pt-4 border-t border-gray-100">
+                <div className="flex justify-end gap-3 mt-4 pt-4 border-t border-slate-200 dark:border-slate-700">
                     <Button variant="ghost" onClick={clearFilters}>{t('btn_clear')}</Button>
                     <Button onClick={fetchLogs} loading={loading}>{t('btn_apply')}</Button>
                 </div>
@@ -292,7 +292,7 @@ export default function TransactionLogPage() {
                 <Card padding="sm">
                     <div className="overflow-x-auto">
                         <table className="w-full">
-                            <thead className="border-b border-gray-100">
+                            <thead className="border-b border-slate-200 dark:border-slate-700">
                                 <tr>
                                     <StockSortHeader col="logged_at">{t('th_logged_at')}</StockSortHeader>
                                     <StockSortHeader col="transaction_date">{t('th_trans_date')}</StockSortHeader>
@@ -304,24 +304,24 @@ export default function TransactionLogPage() {
                                     <StockSortHeader col="new_stock">{t('th_new_stock')}</StockSortHeader>
                                     <StockSortHeader col="factory">{t('th_location')}</StockSortHeader>
                                     <StockSortHeader col="notes">{t('th_notes')}</StockSortHeader>
-                                    <th className="px-4 py-3.5 text-start text-xs font-semibold text-gray-500 uppercase tracking-wider">{t('th_actions')}</th>
+                                    <th className="px-4 py-3.5 text-start text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">{t('th_actions')}</th>
                                 </tr>
                             </thead>
-                            <tbody className="divide-y divide-gray-50">
+                            <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
                                 {filteredStockLogs.map((log) => (
-                                    <tr key={log.id} className="hover:bg-gray-50/50 transition-colors">
-                                        <td className="px-4 py-3 text-xs text-gray-500 whitespace-nowrap">{log.logged_at?.replace('T', ' ').slice(0, 19)}</td>
-                                        <td className="px-4 py-3 text-xs text-gray-500 whitespace-nowrap">{log.transaction_date || '-'}</td>
+                                    <tr key={log.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-700/50 transition-colors">
+                                        <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400 whitespace-nowrap">{log.logged_at?.replace('T', ' ').slice(0, 19)}</td>
+                                        <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400 whitespace-nowrap">{log.transaction_date || '-'}</td>
                                         <td className="px-4 py-3 text-sm font-medium text-indigo-600">{log.item_code}</td>
-                                        <td className="px-4 py-3 text-sm text-gray-900">{log.item_name}</td>
+                                        <td className="px-4 py-3 text-sm text-slate-900 dark:text-slate-100">{log.item_name}</td>
                                         <td className="px-4 py-3"><Badge>{log.transaction_type}</Badge></td>
                                         <td className="px-4 py-3 text-sm font-medium text-center">{log.quantity}</td>
-                                        <td className="px-4 py-3 text-sm text-gray-500 text-center">{log.previous_stock}</td>
+                                        <td className="px-4 py-3 text-sm text-slate-500 dark:text-slate-400 text-center">{log.previous_stock}</td>
                                         <td className="px-4 py-3 text-sm font-bold text-center">{log.new_stock}</td>
-                                        <td className="px-4 py-3 text-xs text-gray-500">{log.factory}</td>
-                                        <td className="px-4 py-3 text-xs text-gray-500 max-w-[200px] truncate">{log.notes || '-'}</td>
+                                        <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400">{log.factory}</td>
+                                        <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400 max-w-[200px] truncate">{log.notes || '-'}</td>
                                         <td className="px-4 py-3">
-                                            <Button size="xs" variant="ghost" onClick={() => setReverseTarget({ id: log.id, source: 'stock' })} className="text-amber-600 hover:bg-amber-50">
+                                            <Button size="xs" variant="ghost" onClick={() => setReverseTarget({ id: log.id, source: 'stock' })} className="text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-900/20">
                                                 {t('btn_reverse')}
                                             </Button>
                                         </td>
@@ -330,11 +330,11 @@ export default function TransactionLogPage() {
                             </tbody>
                         </table>
                         {filteredStockLogs.length === 0 && (
-                            <div className="text-center py-12 text-gray-400 text-sm">{t('no_transactions')}</div>
+                            <div className="text-center py-12 text-slate-400 dark:text-slate-500 text-sm">{t('no_transactions')}</div>
                         )}
                     </div>
                     {filteredStockLogs.length > 0 && (
-                        <div className="px-4 py-3 border-t border-gray-100 text-xs text-gray-500">
+                        <div className="px-4 py-3 border-t border-slate-200 dark:border-slate-700 text-xs text-slate-500 dark:text-slate-400">
                             {t('showing_transactions').replace(':count', String(filteredStockLogs.length))}
                         </div>
                     )}
@@ -346,7 +346,7 @@ export default function TransactionLogPage() {
                 <Card padding="sm">
                     <div className="overflow-x-auto">
                         <table className="w-full">
-                            <thead className="border-b border-gray-100">
+                            <thead className="border-b border-slate-200 dark:border-slate-700">
                                 <tr>
                                     <LedgerSortHeader col="logged_at">{t('th_logged_at')}</LedgerSortHeader>
                                     <LedgerSortHeader col="transaction_date">{t('th_trans_date')}</LedgerSortHeader>
@@ -357,23 +357,23 @@ export default function TransactionLogPage() {
                                     <LedgerSortHeader col="credit">{t('th_credit')}</LedgerSortHeader>
                                     <LedgerSortHeader col="new_balance">{t('th_balance')}</LedgerSortHeader>
                                     <LedgerSortHeader col="statement">{t('th_statement')}</LedgerSortHeader>
-                                    <th className="px-4 py-3.5 text-start text-xs font-semibold text-gray-500 uppercase tracking-wider">{t('th_actions')}</th>
+                                    <th className="px-4 py-3.5 text-start text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">{t('th_actions')}</th>
                                 </tr>
                             </thead>
-                            <tbody className="divide-y divide-gray-50">
+                            <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
                                 {filteredLedgerLogs.map((log) => (
-                                    <tr key={log.id} className="hover:bg-gray-50/50 transition-colors">
-                                        <td className="px-4 py-3 text-xs text-gray-500 whitespace-nowrap">{log.logged_at?.replace('T', ' ').slice(0, 19)}</td>
-                                        <td className="px-4 py-3 text-xs text-gray-500 whitespace-nowrap">{log.transaction_date || '-'}</td>
+                                    <tr key={log.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-700/50 transition-colors">
+                                        <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400 whitespace-nowrap">{log.logged_at?.replace('T', ' ').slice(0, 19)}</td>
+                                        <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400 whitespace-nowrap">{log.transaction_date || '-'}</td>
                                         <td className="px-4 py-3"><Badge variant="info">{log.ledger_type}</Badge></td>
                                         <td className="px-4 py-3 text-sm font-medium text-indigo-600">{log.entity_code}</td>
-                                        <td className="px-4 py-3 text-sm text-gray-900">{log.entity_name}</td>
+                                        <td className="px-4 py-3 text-sm text-slate-900 dark:text-slate-100">{log.entity_name}</td>
                                         <td className="px-4 py-3 text-sm text-emerald-600 font-medium">{Number(log.debit).toFixed(2)}</td>
                                         <td className="px-4 py-3 text-sm text-red-500 font-medium">{Number(log.credit).toFixed(2)}</td>
                                         <td className="px-4 py-3 text-sm font-bold">{Number(log.new_balance).toFixed(2)}</td>
-                                        <td className="px-4 py-3 text-xs text-gray-500 max-w-[200px] truncate">{log.statement || '-'}</td>
+                                        <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400 max-w-[200px] truncate">{log.statement || '-'}</td>
                                         <td className="px-4 py-3">
-                                            <Button size="xs" variant="ghost" onClick={() => setReverseTarget({ id: log.id, source: 'ledger' })} className="text-amber-600 hover:bg-amber-50">
+                                            <Button size="xs" variant="ghost" onClick={() => setReverseTarget({ id: log.id, source: 'ledger' })} className="text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-900/20">
                                                 {t('btn_reverse')}
                                             </Button>
                                         </td>
@@ -382,11 +382,11 @@ export default function TransactionLogPage() {
                             </tbody>
                         </table>
                         {filteredLedgerLogs.length === 0 && (
-                            <div className="text-center py-12 text-gray-400 text-sm">{t('no_transactions')}</div>
+                            <div className="text-center py-12 text-slate-400 dark:text-slate-500 text-sm">{t('no_transactions')}</div>
                         )}
                     </div>
                     {filteredLedgerLogs.length > 0 && (
-                        <div className="px-4 py-3 border-t border-gray-100 text-xs text-gray-500">
+                        <div className="px-4 py-3 border-t border-slate-200 dark:border-slate-700 text-xs text-slate-500 dark:text-slate-400">
                             {t('showing_transactions').replace(':count', String(filteredLedgerLogs.length))}
                         </div>
                     )}
@@ -395,7 +395,7 @@ export default function TransactionLogPage() {
 
             {/* Reverse Confirmation Modal */}
             <Modal open={!!reverseTarget} onClose={() => setReverseTarget(null)} title={t('confirm_reverse_title')}>
-                <p className="text-sm text-gray-600 mb-2">{t('confirm_reverse_message')}</p>
+                <p className="text-sm text-slate-600 dark:text-slate-400 mb-2">{t('confirm_reverse_message')}</p>
                 <p className="text-xs text-amber-600 mb-4">{t('confirm_reverse_warning')}</p>
                 <div className="flex justify-end gap-3">
                     <Button variant="secondary" onClick={() => setReverseTarget(null)}>{t('btn_cancel')}</Button>

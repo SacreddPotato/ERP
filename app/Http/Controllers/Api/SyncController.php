@@ -11,6 +11,7 @@ class SyncController extends Controller
 {
     public function pull(): JsonResponse
     {
+        set_time_limit(300);
         try {
             $service = app(FirebaseSyncService::class);
             $result = $service->pullAll(true);
@@ -22,6 +23,7 @@ class SyncController extends Controller
 
     public function push(): JsonResponse
     {
+        set_time_limit(300);
         try {
             $service = app(FirebaseSyncService::class);
             $result = $service->pushAll();
@@ -33,6 +35,7 @@ class SyncController extends Controller
 
     public function forcePull(): JsonResponse
     {
+        set_time_limit(300);
         try {
             $service = app(FirebaseSyncService::class);
             $result = $service->forcePull();

@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Enums\LedgerTransactionType;
 use App\Enums\LedgerType;
 use App\Models\LedgerLog;
+use App\Models\LedgerTransaction;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -275,10 +276,21 @@ class LedgerService
 
     public function getEntityTransactions(string $code, LedgerType $type): Collection
     {
-        return LedgerLog::where('entity_code', $code)
+        $logs = LedgerLog::where('entity_code', $code)
             ->where('ledger_type', $type->value)
-            ->orderByDesc('logged_at')
             ->get();
+
+        $txns = LedgerTransaction::where('entity_code', $code)
+            ->where('ledger_type', $type->value)
+            ->get();
+
+        return $logs->merge($txns)
+            ->unique(fn ($item) => ($item->logged_at ?? '') . '|' . $item->entity_code . '|' . $item->debit . '|' . $item->credit)
+            ->sortBy([
+                ['transaction_date', 'desc'],
+                ['logged_at', 'desc'],
+            ])
+            ->values();
     }
 
     protected function getNameColumn(LedgerType $type): string

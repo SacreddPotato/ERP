@@ -108,7 +108,7 @@ export default function StockTable() {
     const SortHeader = ({ col, children }: { col: string; children: React.ReactNode }) => (
         <th
             onClick={() => toggleSort(col)}
-            className="px-4 py-3.5 text-start text-xs font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:text-gray-900 select-none whitespace-nowrap"
+            className="px-4 py-3.5 text-start text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider cursor-pointer hover:text-slate-900 dark:hover:text-slate-200 select-none whitespace-nowrap"
         >
             <span className="inline-flex items-center gap-1">
                 {children}
@@ -121,14 +121,14 @@ export default function StockTable() {
         <div className="space-y-6">
             {/* Low Stock Alerts */}
             {lowStockItems.length > 0 && (
-                <div className="bg-amber-50 border border-amber-200 rounded-2xl p-5">
-                    <h4 className="text-sm font-semibold text-amber-800 mb-3">{t('low_stock_alerts')}</h4>
+                <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-2xl p-5">
+                    <h4 className="text-sm font-semibold text-amber-800 dark:text-amber-300 mb-3">{t('low_stock_alerts')}</h4>
                     <div className="space-y-2">
                         {lowStockItems.map((item) => (
                             <div key={item.item_code} className="flex items-center gap-3 text-sm">
                                 <Badge variant="warning">{item.item_code}</Badge>
-                                <span className="font-medium text-gray-800">{item.name}</span>
-                                <span className="text-gray-500">{t('notification_current')} {item.net_stock} | {t('notification_min')} {item.min_stock}</span>
+                                <span className="font-medium text-slate-800 dark:text-slate-200">{item.name}</span>
+                                <span className="text-slate-500 dark:text-slate-400">{t('notification_current')} {item.net_stock} | {t('notification_min')} {item.min_stock}</span>
                             </div>
                         ))}
                     </div>
@@ -156,7 +156,7 @@ export default function StockTable() {
             <Card padding="sm">
                 <div className="overflow-x-auto">
                     <table className="w-full">
-                        <thead className="border-b border-gray-100">
+                        <thead className="border-b border-slate-200 dark:border-slate-700">
                             <tr>
                                 <SortHeader col="item_code">{t('th_id')}</SortHeader>
                                 <SortHeader col="name">{t('th_name')}</SortHeader>
@@ -169,37 +169,37 @@ export default function StockTable() {
                                 <SortHeader col="net_stock">{t('th_net_stock')}</SortHeader>
                                 <SortHeader col="unit_price">{t('th_price')}</SortHeader>
                                 <SortHeader col="min_stock">{t('th_min_stock')}</SortHeader>
-                                <th className="px-4 py-3.5 text-start text-xs font-semibold text-gray-500 uppercase tracking-wider">{t('th_actions')}</th>
+                                <th className="px-4 py-3.5 text-start text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">{t('th_actions')}</th>
                             </tr>
                         </thead>
-                        <tbody className="divide-y divide-gray-50">
+                        <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
                             {sortedItems.map((item) => (
-                                <tr key={item.item_code} className="hover:bg-gray-50/50 transition-colors">
+                                <tr key={item.item_code} className="hover:bg-slate-50/50 dark:hover:bg-slate-700/50 transition-colors">
                                     <td className="px-4 py-3.5 text-sm font-medium text-indigo-600">{item.item_code}</td>
                                     <td className="px-4 py-3.5 text-sm">
                                         {editingCode === item.item_code
-                                            ? <input className="w-full border rounded-lg px-2 py-1 text-sm" value={editData.name} onChange={(e) => setEditData({ ...editData, name: e.target.value })} />
-                                            : <span className="font-medium text-gray-900">{item.name}</span>}
+                                            ? <input className="w-full border rounded-lg px-2 py-1 text-sm dark:bg-slate-700 dark:border-slate-600 dark:text-slate-100" value={editData.name} onChange={(e) => setEditData({ ...editData, name: e.target.value })} />
+                                            : <span className="font-medium text-slate-900 dark:text-slate-100">{item.name}</span>}
                                     </td>
-                                    <td className="px-4 py-3.5 text-sm text-gray-600">{item.category}</td>
-                                    <td className="px-4 py-3.5 text-sm text-gray-600">{item.unit}</td>
-                                    <td className="px-4 py-3.5 text-sm text-gray-600">{item.supplier || '-'}</td>
-                                    <td className="px-4 py-3.5 text-sm text-gray-600 text-center">{item.starting_balance}</td>
+                                    <td className="px-4 py-3.5 text-sm text-slate-600 dark:text-slate-400">{item.category}</td>
+                                    <td className="px-4 py-3.5 text-sm text-slate-600 dark:text-slate-400">{item.unit}</td>
+                                    <td className="px-4 py-3.5 text-sm text-slate-600 dark:text-slate-400">{item.supplier || '-'}</td>
+                                    <td className="px-4 py-3.5 text-sm text-slate-600 dark:text-slate-400 text-center">{item.starting_balance}</td>
                                     <td className="px-4 py-3.5 text-sm text-emerald-600 font-medium text-center">{item.total_incoming}</td>
                                     <td className="px-4 py-3.5 text-sm text-red-500 font-medium text-center">{item.total_outgoing}</td>
-                                    <td className="px-4 py-3.5 text-sm font-bold text-gray-900 text-center">
+                                    <td className="px-4 py-3.5 text-sm font-bold text-slate-900 dark:text-slate-100 text-center">
                                         {editingCode === item.item_code
                                             ? item.net_stock
                                             : <span className={item.net_stock <= item.min_stock && item.min_stock > 0 ? 'text-red-600' : ''}>{item.net_stock}</span>}
                                     </td>
-                                    <td className="px-4 py-3.5 text-sm text-gray-600 text-center">
+                                    <td className="px-4 py-3.5 text-sm text-slate-600 dark:text-slate-400 text-center">
                                         {editingCode === item.item_code
-                                            ? <input type="number" className="w-20 border rounded-lg px-2 py-1 text-sm" value={editData.unit_price} onChange={(e) => setEditData({ ...editData, unit_price: e.target.value })} />
+                                            ? <input type="number" className="w-20 border rounded-lg px-2 py-1 text-sm dark:bg-slate-700 dark:border-slate-600 dark:text-slate-100" value={editData.unit_price} onChange={(e) => setEditData({ ...editData, unit_price: e.target.value })} />
                                             : Number(item.unit_price).toFixed(2)}
                                     </td>
-                                    <td className="px-4 py-3.5 text-sm text-gray-600 text-center">
+                                    <td className="px-4 py-3.5 text-sm text-slate-600 dark:text-slate-400 text-center">
                                         {editingCode === item.item_code
-                                            ? <input type="number" className="w-16 border rounded-lg px-2 py-1 text-sm" value={editData.min_stock} onChange={(e) => setEditData({ ...editData, min_stock: e.target.value })} />
+                                            ? <input type="number" className="w-16 border rounded-lg px-2 py-1 text-sm dark:bg-slate-700 dark:border-slate-600 dark:text-slate-100" value={editData.min_stock} onChange={(e) => setEditData({ ...editData, min_stock: e.target.value })} />
                                             : item.min_stock}
                                     </td>
                                     <td className="px-4 py-3.5">
@@ -212,7 +212,7 @@ export default function StockTable() {
                                             ) : (
                                                 <>
                                                     <Button size="xs" variant="ghost" onClick={() => startEdit(item)}>{t('btn_update')}</Button>
-                                                    <Button size="xs" variant="ghost" onClick={() => setDeleteTarget({ code: item.item_code, name: item.name })} className="text-red-500 hover:text-red-700 hover:bg-red-50">{t('btn_delete')}</Button>
+                                                    <Button size="xs" variant="ghost" onClick={() => setDeleteTarget({ code: item.item_code, name: item.name })} className="text-red-500 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-900/20">{t('btn_delete')}</Button>
                                                 </>
                                             )}
                                         </div>
@@ -222,8 +222,8 @@ export default function StockTable() {
                         </tbody>
                     </table>
                     {sortedItems.length === 0 && (
-                        <div className="text-center py-12 text-gray-400">
-                            <svg className="w-12 h-12 mx-auto mb-3 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                        <div className="text-center py-12 text-slate-400 dark:text-slate-500">
+                            <svg className="w-12 h-12 mx-auto mb-3 text-slate-300 dark:text-slate-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                                 <path strokeLinecap="round" strokeLinejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
                             </svg>
                             <p className="text-sm">{t('no_items')}</p>
@@ -231,7 +231,7 @@ export default function StockTable() {
                     )}
                 </div>
                 {sortedItems.length > 0 && (
-                    <div className="px-4 py-3 border-t border-gray-100 text-xs text-gray-500">
+                    <div className="px-4 py-3 border-t border-slate-200 dark:border-slate-700 text-xs text-slate-500 dark:text-slate-400">
                         {t('showing_items').replace(':count', String(sortedItems.length))}
                     </div>
                 )}
@@ -239,7 +239,7 @@ export default function StockTable() {
 
             {/* Delete Modal */}
             <Modal open={!!deleteTarget} onClose={() => { setDeleteTarget(null); setDeletePassword(''); }} title={t('delete_confirmation_title')}>
-                <p className="text-sm text-gray-600 mb-4">{t('delete_confirmation_message')}</p>
+                <p className="text-sm text-slate-600 dark:text-slate-400 mb-4">{t('delete_confirmation_message')}</p>
                 {deleteTarget && <p className="text-sm font-medium mb-4">{deleteTarget.code} - {deleteTarget.name}</p>}
                 <Input type="password" value={deletePassword} onChange={(e) => setDeletePassword(e.target.value)} placeholder={t('placeholder_delete_password')} label={t('delete_password_label')} />
                 <div className="flex justify-end gap-3 mt-5">

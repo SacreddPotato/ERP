@@ -18,7 +18,7 @@ const colorMap = {
 
 export function StatCard({ label, value, icon, color = 'blue' }: StatCardProps) {
     return (
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 flex items-center gap-4">
+        <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700 p-5 flex items-center gap-4">
             <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${colorMap[color]} flex items-center justify-center text-white shrink-0`}>
                 {icon || (
                     <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -27,8 +27,8 @@ export function StatCard({ label, value, icon, color = 'blue' }: StatCardProps) 
                 )}
             </div>
             <div className="min-w-0">
-                <p className="text-sm text-gray-500 truncate">{label}</p>
-                <p className="text-xl font-bold text-gray-900 mt-0.5">{typeof value === 'number' ? value.toLocaleString() : value}</p>
+                <p className="text-sm text-slate-500 dark:text-slate-400 truncate">{label}</p>
+                <p className="text-xl font-bold text-slate-900 dark:text-slate-100 mt-0.5">{typeof value === 'number' ? value.toLocaleString() : value}</p>
             </div>
         </div>
     );

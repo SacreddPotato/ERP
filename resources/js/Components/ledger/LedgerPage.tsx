@@ -16,25 +16,25 @@ interface LedgerPageProps {
 
 const CONFIG = {
     customer: {
-        codeColumn: 'customer_code', nameColumn: 'name', hasEmail: true,
+        codeColumn: 'customer_code', nameColumn: 'name', hasEmail: true, hasPhone: true,
         entryKey: 'customer_entry', idKey: 'customer_id', nameKey: 'customer_name',
         listKey: 'customers_list', saveKey: 'btn_save_customer', noDataKey: 'no_customers',
         countKey: 'showing_customers', idPlaceholder: 'placeholder_customer_id', namePlaceholder: 'placeholder_customer_name',
     },
     supplier: {
-        codeColumn: 'supplier_code', nameColumn: 'name', hasEmail: true,
+        codeColumn: 'supplier_code', nameColumn: 'name', hasEmail: true, hasPhone: true,
         entryKey: 'supplier_entry', idKey: 'supplier_id', nameKey: 'supplier_name',
         listKey: 'suppliers_list', saveKey: 'btn_save_supplier', noDataKey: 'no_suppliers',
         countKey: 'showing_suppliers', idPlaceholder: 'placeholder_supplier_id', namePlaceholder: 'placeholder_supplier_name',
     },
     covenant: {
-        codeColumn: 'covenant_code', nameColumn: 'employee_name', hasEmail: false,
+        codeColumn: 'covenant_code', nameColumn: 'employee_name', hasEmail: false, hasPhone: true,
         entryKey: 'covenant_entry', idKey: 'covenant_id', nameKey: 'employee_name',
         listKey: 'covenants_list', saveKey: 'btn_save_covenant', noDataKey: 'no_covenants',
         countKey: 'showing_covenants', idPlaceholder: 'placeholder_covenant_id', namePlaceholder: 'placeholder_employee_name',
     },
     advance: {
-        codeColumn: 'advance_code', nameColumn: 'employee_name', hasEmail: false,
+        codeColumn: 'advance_code', nameColumn: 'employee_name', hasEmail: false, hasPhone: true,
         entryKey: 'advance_entry', idKey: 'advance_id', nameKey: 'employee_name',
         listKey: 'advances_list', saveKey: 'btn_save_advance', noDataKey: 'no_advances',
         countKey: 'showing_advances', idPlaceholder: 'placeholder_advance_id', namePlaceholder: 'placeholder_employee_name',
@@ -64,11 +64,17 @@ export default function LedgerPage({ type }: LedgerPageProps) {
     const [paymentMethod, setPaymentMethod] = useState('');
     const [statement, setStatement] = useState('');
 
-    // Transaction view
-    const [viewingCode, setViewingCode] = useState<string | null>(null);
+    // Expanded transactions
+    const [expandedCode, setExpandedCode] = useState<string | null>(null);
     const [transactions, setTransactions] = useState<LedgerLog[]>([]);
-    const [txSortBy, setTxSortBy] = useState('logged_at');
+    const [txLoading, setTxLoading] = useState(false);
+    const [txSortBy, setTxSortBy] = useState('transaction_date');
     const [txSortDir, setTxSortDir] = useState<'asc' | 'desc'>('desc');
+
+    // Edit modal
+    const [editTarget, setEditTarget] = useState<LedgerEntity | null>(null);
+    const [editFields, setEditFields] = useState<Record<string, any>>({});
+    const [editLoading, setEditLoading] = useState(false);
 
     // Delete
     const [deleteTarget, setDeleteTarget] = useState<{ code: string; name: string } | null>(null);
@@ -132,45 +138,77 @@ export default function LedgerPage({ type }: LedgerPageProps) {
         setLoading(false);
     };
 
-    const viewTransactions = async (entityCode: string) => {
-        if (viewingCode === entityCode) { setViewingCode(null); return; }
+    const toggleExpand = async (entityCode: string) => {
+        if (expandedCode === entityCode) {
+            setExpandedCode(null);
+            return;
+        }
+        setTxLoading(true);
         try {
             const res = await api.get(`/api/ledger/${type}/transactions`, { params: { code: entityCode } });
             setTransactions(res.data);
-            setViewingCode(entityCode);
-            setTxSortBy('logged_at');
+            setExpandedCode(entityCode);
+            setTxSortBy('transaction_date');
             setTxSortDir('desc');
         } catch { toast(t('sync_failed'), 'error'); }
+        setTxLoading(false);
     };
 
     const toggleTxSort = (col: string) => {
         if (txSortBy === col) setTxSortDir(d => d === 'asc' ? 'desc' : 'asc');
-        else { setTxSortBy(col); setTxSortDir('asc'); }
+        else { setTxSortBy(col); setTxSortDir('desc'); }
     };
 
     const sortedTransactions = [...transactions].sort((a, b) => {
         const aVal = (a as any)[txSortBy];
         const bVal = (b as any)[txSortBy];
-        if (aVal == null && bVal == null) return 0;
+        if (aVal == null && bVal == null) {
+            // Secondary sort by logged_at desc
+            const aLog = a.logged_at ?? '';
+            const bLog = b.logged_at ?? '';
+            return bLog.localeCompare(aLog);
+        }
         if (aVal == null) return txSortDir === 'asc' ? -1 : 1;
         if (bVal == null) return txSortDir === 'asc' ? 1 : -1;
         const cmp = typeof aVal === 'number' && typeof bVal === 'number'
             ? aVal - bVal
             : String(aVal).localeCompare(String(bVal));
-        return txSortDir === 'asc' ? cmp : -cmp;
+        const primary = txSortDir === 'asc' ? cmp : -cmp;
+        if (primary !== 0) return primary;
+        // Secondary sort: logged_at desc
+        const aLog = a.logged_at ?? '';
+        const bLog = b.logged_at ?? '';
+        return bLog.localeCompare(aLog);
     });
 
-    const TxSortHeader = ({ col, children }: { col: string; children: React.ReactNode }) => (
-        <th
-            onClick={() => toggleTxSort(col)}
-            className="px-3 py-2 text-xs font-semibold text-gray-500 text-start cursor-pointer hover:text-gray-900 select-none whitespace-nowrap"
-        >
-            <span className="inline-flex items-center gap-1">
-                {children}
-                {txSortBy === col && <span className="text-indigo-600">{txSortDir === 'asc' ? '\u25B2' : '\u25BC'}</span>}
-            </span>
-        </th>
-    );
+    const openEdit = (entity: LedgerEntity) => {
+        setEditTarget(entity);
+        setEditFields({
+            [cfg.nameColumn]: entity[cfg.nameColumn] ?? '',
+            phone: entity.phone ?? '',
+            email: entity.email ?? '',
+            registration_date: entity.registration_date ?? '',
+            document_number: entity.document_number ?? '',
+            opening_balance: entity.opening_balance ?? 0,
+            payment_method: entity.payment_method ?? '',
+            statement: entity.statement ?? '',
+        });
+    };
+
+    const saveEdit = async () => {
+        if (!editTarget) return;
+        setEditLoading(true);
+        try {
+            await api.post(`/api/ledger/${type}/update`, {
+                code: editTarget[cfg.codeColumn],
+                ...editFields,
+            });
+            toast(t('msg_item_updated'), 'success');
+            setEditTarget(null);
+            fetchData();
+        } catch (e: any) { toast(e.response?.data?.message || t('sync_failed'), 'error'); }
+        setEditLoading(false);
+    };
 
     const confirmDelete = async () => {
         if (!deleteTarget) return;
@@ -183,6 +221,27 @@ export default function LedgerPage({ type }: LedgerPageProps) {
     };
 
     const paymentOptions = PAYMENT_METHODS.map(p => ({ value: p.value, label: t(p.labelKey) }));
+
+    const TxSortHeader = ({ col, children }: { col: string; children: React.ReactNode }) => (
+        <th
+            onClick={() => toggleTxSort(col)}
+            className="px-3 py-2.5 text-xs font-semibold text-slate-500 dark:text-slate-400 text-start cursor-pointer hover:text-slate-800 dark:hover:text-slate-200 select-none whitespace-nowrap transition-colors"
+        >
+            <span className="inline-flex items-center gap-1">
+                {children}
+                {txSortBy === col && <span className="text-indigo-500">{txSortDir === 'asc' ? '\u25B2' : '\u25BC'}</span>}
+            </span>
+        </th>
+    );
+
+    const ChevronIcon = ({ expanded }: { expanded: boolean }) => (
+        <svg
+            className={`w-4 h-4 text-slate-400 dark:text-slate-500 transition-transform duration-200 ${expanded ? 'rotate-90' : ''}`}
+            fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}
+        >
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+        </svg>
+    );
 
     return (
         <div className="space-y-6">
@@ -209,12 +268,12 @@ export default function LedgerPage({ type }: LedgerPageProps) {
 
                 {code && (
                     <>
-                        {isExisting && <Badge variant="info" >{t('account_exists')}</Badge>}
+                        {isExisting && <Badge variant="info">{t('account_exists')}</Badge>}
                         {!isExisting && code && <Badge variant="success">{t('account_new')}</Badge>}
 
                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5 mt-5">
                             <Input label={t(cfg.nameKey)} value={entityName} onChange={(e) => setEntityName(e.target.value)} placeholder={t(cfg.namePlaceholder)} />
-                            <Input label={t('employee_phone')} value={phone} onChange={(e) => setPhone(e.target.value)} placeholder={t('placeholder_phone')} />
+                            {cfg.hasPhone && <Input label={t('employee_phone')} value={phone} onChange={(e) => setPhone(e.target.value)} placeholder={t('placeholder_phone')} />}
                             {cfg.hasEmail && <Input label={t('customer_email')} type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder={t('placeholder_email')} />}
                             <Input label={t('registration_date')} type="date" value={registrationDate} onChange={(e) => setRegistrationDate(e.target.value)} />
                             <Input label={t('document_number')} value={documentNumber} onChange={(e) => setDocumentNumber(e.target.value)} placeholder={t('placeholder_document_number')} />
@@ -226,7 +285,7 @@ export default function LedgerPage({ type }: LedgerPageProps) {
                         <div className="mt-5">
                             <Textarea label={t('statement')} value={statement} onChange={(e) => setStatement(e.target.value)} placeholder={t('placeholder_statement')} />
                         </div>
-                        <div className="flex justify-end mt-6 pt-5 border-t border-gray-100">
+                        <div className="flex justify-end mt-6 pt-5 border-t border-slate-200 dark:border-slate-700">
                             <Button onClick={save} loading={loading} size="lg">{t(cfg.saveKey)}</Button>
                         </div>
                     </>
@@ -236,79 +295,122 @@ export default function LedgerPage({ type }: LedgerPageProps) {
             {/* Entity List */}
             <Card padding="sm">
                 <div className="px-4 pt-4 pb-3 flex items-center justify-between">
-                    <h3 className="text-lg font-semibold text-gray-900">{t(cfg.listKey)}</h3>
+                    <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-200">{t(cfg.listKey)}</h3>
                     <div className="w-64">
                         <Input placeholder={t('placeholder_search')} value={search} onChange={(e) => setSearch(e.target.value)} />
                     </div>
                 </div>
                 <div className="overflow-x-auto">
                     <table className="w-full">
-                        <thead className="border-b border-gray-100">
-                            <tr>
-                                <th className="px-4 py-3 text-start text-xs font-semibold text-gray-500 uppercase">{t('th_id')}</th>
-                                <th className="px-4 py-3 text-start text-xs font-semibold text-gray-500 uppercase">{t('th_name')}</th>
-                                {cfg.hasEmail && <th className="px-4 py-3 text-start text-xs font-semibold text-gray-500 uppercase">{t('th_phone')}</th>}
-                                <th className="px-4 py-3 text-start text-xs font-semibold text-gray-500 uppercase">{t('th_opening_balance')}</th>
-                                <th className="px-4 py-3 text-start text-xs font-semibold text-gray-500 uppercase">{t('th_debit')}</th>
-                                <th className="px-4 py-3 text-start text-xs font-semibold text-gray-500 uppercase">{t('th_credit')}</th>
-                                <th className="px-4 py-3 text-start text-xs font-semibold text-gray-500 uppercase">{t('th_balance')}</th>
-                                <th className="px-4 py-3 text-start text-xs font-semibold text-gray-500 uppercase">{t('th_actions')}</th>
+                        <thead>
+                            <tr className="bg-slate-50 dark:bg-slate-700/50 border-y border-slate-200 dark:border-slate-600">
+                                <th className="px-4 py-3 text-start text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">{t('th_id')}</th>
+                                <th className="px-4 py-3 text-start text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">{t('th_name')}</th>
+                                {cfg.hasEmail && <th className="px-4 py-3 text-start text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">{t('th_phone')}</th>}
+                                <th className="px-4 py-3 text-start text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">{t('th_opening_balance')}</th>
+                                <th className="px-4 py-3 text-start text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">{t('th_debit')}</th>
+                                <th className="px-4 py-3 text-start text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">{t('th_credit')}</th>
+                                <th className="px-4 py-3 text-start text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">{t('th_balance')}</th>
+                                <th className="px-4 py-3 text-start text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">{t('th_actions')}</th>
                             </tr>
                         </thead>
-                        <tbody className="divide-y divide-gray-50">
+                        <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
                             {entities.map((entity) => {
                                 const entityCode = entity[cfg.codeColumn];
                                 const entityDisplayName = entity[cfg.nameColumn];
+                                const isExpanded = expandedCode === entityCode;
+                                const balance = Number(entity.balance);
                                 return (
                                     <React.Fragment key={entityCode}>
-                                        <tr className="hover:bg-gray-50/50 transition-colors">
-                                            <td className="px-4 py-3.5 text-sm font-medium text-indigo-600">{entityCode}</td>
-                                            <td className="px-4 py-3.5 text-sm font-medium text-gray-900">{entityDisplayName}</td>
-                                            {cfg.hasEmail && <td className="px-4 py-3.5 text-sm text-gray-600">{entity.phone || '-'}</td>}
-                                            <td className="px-4 py-3.5 text-sm text-gray-600">{Number(entity.opening_balance).toFixed(2)}</td>
-                                            <td className="px-4 py-3.5 text-sm text-emerald-600 font-medium">{Number(entity.debit).toFixed(2)}</td>
-                                            <td className="px-4 py-3.5 text-sm text-red-500 font-medium">{Number(entity.credit).toFixed(2)}</td>
-                                            <td className="px-4 py-3.5 text-sm font-bold">{Number(entity.balance).toFixed(2)}</td>
+                                        <tr className={`transition-colors ${isExpanded ? 'bg-indigo-50/40 dark:bg-indigo-900/20' : 'hover:bg-slate-50/70 dark:hover:bg-slate-700/50'}`}>
                                             <td className="px-4 py-3.5">
-                                                <div className="flex gap-1.5">
-                                                    <Button size="xs" variant="ghost" onClick={() => viewTransactions(entityCode)}>
-                                                        {viewingCode === entityCode ? t('btn_close') : t('tab_transactions')}
-                                                    </Button>
-                                                    <Button size="xs" variant="ghost" onClick={() => setDeleteTarget({ code: entityCode, name: entityDisplayName })} className="text-red-500 hover:text-red-700 hover:bg-red-50">{t('btn_delete')}</Button>
+                                                <button
+                                                    onClick={() => toggleExpand(entityCode)}
+                                                    className="inline-flex items-center gap-2 group"
+                                                >
+                                                    <ChevronIcon expanded={isExpanded} />
+                                                    <span className="text-sm font-semibold text-indigo-600 dark:text-indigo-400 group-hover:text-indigo-800 dark:group-hover:text-indigo-300 transition-colors">
+                                                        {entityCode}
+                                                    </span>
+                                                </button>
+                                            </td>
+                                            <td className="px-4 py-3.5 text-sm font-medium text-slate-800 dark:text-slate-200">{entityDisplayName}</td>
+                                            {cfg.hasEmail && <td className="px-4 py-3.5 text-sm text-slate-500 dark:text-slate-400">{entity.phone || '-'}</td>}
+                                            <td className="px-4 py-3.5 text-sm text-slate-500 dark:text-slate-400 tabular-nums">{Number(entity.opening_balance).toFixed(2)}</td>
+                                            <td className="px-4 py-3.5 text-sm text-emerald-600 font-medium tabular-nums">{Number(entity.debit).toFixed(2)}</td>
+                                            <td className="px-4 py-3.5 text-sm text-red-500 font-medium tabular-nums">{Number(entity.credit).toFixed(2)}</td>
+                                            <td className="px-4 py-3.5">
+                                                <span className={`text-sm font-bold tabular-nums ${balance >= 0 ? 'text-slate-900 dark:text-slate-100' : 'text-red-600'}`}>
+                                                    {balance.toFixed(2)}
+                                                </span>
+                                            </td>
+                                            <td className="px-4 py-3.5">
+                                                <div className="flex items-center gap-1">
+                                                    <button
+                                                        onClick={() => openEdit(entity)}
+                                                        className="p-1.5 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 transition-colors"
+                                                        title={t('btn_edit')}
+                                                    >
+                                                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                                            <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                                        </svg>
+                                                    </button>
+                                                    <button
+                                                        onClick={() => setDeleteTarget({ code: entityCode, name: entityDisplayName })}
+                                                        className="p-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                                                        title={t('btn_delete')}
+                                                    >
+                                                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                                            <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                                        </svg>
+                                                    </button>
                                                 </div>
                                             </td>
                                         </tr>
-                                        {viewingCode === entityCode && (
+                                        {isExpanded && (
                                             <tr>
-                                                <td colSpan={8} className="px-4 py-4 bg-gray-50/80">
-                                                    <div className="rounded-xl border border-gray-200 overflow-hidden">
-                                                        <table className="w-full">
-                                                            <thead className="bg-gray-100">
-                                                                <tr>
-                                                                    <TxSortHeader col="logged_at">{t('th_date')}</TxSortHeader>
-                                                                    <TxSortHeader col="transaction_type">{t('th_type')}</TxSortHeader>
-                                                                    <TxSortHeader col="debit">{t('th_debit')}</TxSortHeader>
-                                                                    <TxSortHeader col="credit">{t('th_credit')}</TxSortHeader>
-                                                                    <TxSortHeader col="new_balance">{t('th_balance')}</TxSortHeader>
-                                                                    <TxSortHeader col="statement">{t('th_statement')}</TxSortHeader>
-                                                                </tr>
-                                                            </thead>
-                                                            <tbody className="divide-y divide-gray-100 bg-white">
-                                                                {sortedTransactions.map((tx) => (
-                                                                    <tr key={tx.id}>
-                                                                        <td className="px-3 py-2 text-xs text-gray-600 whitespace-nowrap">{tx.logged_at?.replace('T', ' ').slice(0, 19)}</td>
-                                                                        <td className="px-3 py-2 text-xs"><Badge>{tx.transaction_type}</Badge></td>
-                                                                        <td className="px-3 py-2 text-xs text-emerald-600">{Number(tx.debit).toFixed(2)}</td>
-                                                                        <td className="px-3 py-2 text-xs text-red-500">{Number(tx.credit).toFixed(2)}</td>
-                                                                        <td className="px-3 py-2 text-xs font-bold">{Number(tx.new_balance).toFixed(2)}</td>
-                                                                        <td className="px-3 py-2 text-xs text-gray-500">{tx.statement || '-'}</td>
+                                                <td colSpan={cfg.hasEmail ? 8 : 7} className="p-0">
+                                                    <div className="mx-4 my-3 rounded-xl border border-slate-200 dark:border-slate-600 overflow-hidden shadow-sm">
+                                                        {txLoading ? (
+                                                            <div className="flex items-center justify-center py-8">
+                                                                <svg className="animate-spin h-5 w-5 text-indigo-500" fill="none" viewBox="0 0 24 24">
+                                                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                                                                </svg>
+                                                            </div>
+                                                        ) : (
+                                                            <table className="w-full">
+                                                                <thead>
+                                                                    <tr className="bg-slate-100/80 dark:bg-slate-700/80 border-b border-slate-200 dark:border-slate-600">
+                                                                        <TxSortHeader col="transaction_date">{t('th_trans_date')}</TxSortHeader>
+                                                                        <TxSortHeader col="logged_at">{t('th_logged_at')}</TxSortHeader>
+                                                                        <TxSortHeader col="transaction_type">{t('th_type')}</TxSortHeader>
+                                                                        <TxSortHeader col="debit">{t('th_debit')}</TxSortHeader>
+                                                                        <TxSortHeader col="credit">{t('th_credit')}</TxSortHeader>
+                                                                        <TxSortHeader col="new_balance">{t('th_balance')}</TxSortHeader>
+                                                                        <TxSortHeader col="payment_method">{t('th_payment_method')}</TxSortHeader>
+                                                                        <TxSortHeader col="statement">{t('th_statement')}</TxSortHeader>
                                                                     </tr>
-                                                                ))}
-                                                                {transactions.length === 0 && (
-                                                                    <tr><td colSpan={6} className="px-3 py-6 text-center text-xs text-gray-400">{t('no_transactions')}</td></tr>
-                                                                )}
-                                                            </tbody>
-                                                        </table>
+                                                                </thead>
+                                                                <tbody className="divide-y divide-slate-100 dark:divide-slate-700 bg-white dark:bg-slate-800">
+                                                                    {sortedTransactions.map((tx) => (
+                                                                        <tr key={tx.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-700/50 transition-colors">
+                                                                            <td className="px-3 py-2.5 text-xs text-slate-600 dark:text-slate-400 whitespace-nowrap">{tx.transaction_date || '-'}</td>
+                                                                            <td className="px-3 py-2.5 text-xs text-slate-400 dark:text-slate-500 whitespace-nowrap">{tx.logged_at?.replace('T', ' ').slice(0, 19) || '-'}</td>
+                                                                            <td className="px-3 py-2.5 text-xs"><Badge>{tx.transaction_type}</Badge></td>
+                                                                            <td className="px-3 py-2.5 text-xs text-emerald-600 font-medium tabular-nums">{Number(tx.debit).toFixed(2)}</td>
+                                                                            <td className="px-3 py-2.5 text-xs text-red-500 font-medium tabular-nums">{Number(tx.credit).toFixed(2)}</td>
+                                                                            <td className="px-3 py-2.5 text-xs font-bold tabular-nums">{Number(tx.new_balance).toFixed(2)}</td>
+                                                                            <td className="px-3 py-2.5 text-xs text-slate-500 dark:text-slate-400">{tx.payment_method ? t(`payment_${tx.payment_method}`) : '-'}</td>
+                                                                            <td className="px-3 py-2.5 text-xs text-slate-500 dark:text-slate-400 max-w-[200px] truncate">{tx.statement || '-'}</td>
+                                                                        </tr>
+                                                                    ))}
+                                                                    {transactions.length === 0 && (
+                                                                        <tr><td colSpan={8} className="px-3 py-8 text-center text-xs text-slate-400 dark:text-slate-500">{t('no_transactions')}</td></tr>
+                                                                    )}
+                                                                </tbody>
+                                                            </table>
+                                                        )}
                                                     </div>
                                                 </td>
                                             </tr>
@@ -319,19 +421,86 @@ export default function LedgerPage({ type }: LedgerPageProps) {
                         </tbody>
                     </table>
                     {entities.length === 0 && (
-                        <div className="text-center py-12 text-gray-400 text-sm">{t(cfg.noDataKey)}</div>
+                        <div className="text-center py-12 text-slate-400 dark:text-slate-500 text-sm">{t(cfg.noDataKey)}</div>
                     )}
                 </div>
                 {entities.length > 0 && (
-                    <div className="px-4 py-3 border-t border-gray-100 text-xs text-gray-500">
+                    <div className="px-4 py-3 border-t border-slate-100 dark:border-slate-700 text-xs text-slate-500 dark:text-slate-400">
                         {t(cfg.countKey).replace(':count', String(entities.length))}
                     </div>
                 )}
             </Card>
 
+            {/* Edit Modal */}
+            <Modal open={!!editTarget} onClose={() => setEditTarget(null)} title={t('btn_edit')}>
+                {editTarget && (
+                    <div className="space-y-4">
+                        <div className="px-3 py-2 rounded-lg bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600">
+                            <span className="text-xs text-slate-500 dark:text-slate-400">{t(cfg.idKey)}</span>
+                            <p className="text-sm font-semibold text-indigo-600">{editTarget[cfg.codeColumn]}</p>
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <Input
+                                label={t(cfg.nameKey)}
+                                value={editFields[cfg.nameColumn] ?? ''}
+                                onChange={(e) => setEditFields(f => ({ ...f, [cfg.nameColumn]: e.target.value }))}
+                            />
+                            {cfg.hasPhone && (
+                                <Input
+                                    label={t('employee_phone')}
+                                    value={editFields.phone ?? ''}
+                                    onChange={(e) => setEditFields(f => ({ ...f, phone: e.target.value }))}
+                                />
+                            )}
+                            {cfg.hasEmail && (
+                                <Input
+                                    label={t('customer_email')}
+                                    type="email"
+                                    value={editFields.email ?? ''}
+                                    onChange={(e) => setEditFields(f => ({ ...f, email: e.target.value }))}
+                                />
+                            )}
+                            <Input
+                                label={t('registration_date')}
+                                type="date"
+                                value={editFields.registration_date ?? ''}
+                                onChange={(e) => setEditFields(f => ({ ...f, registration_date: e.target.value }))}
+                            />
+                            <Input
+                                label={t('document_number')}
+                                value={editFields.document_number ?? ''}
+                                onChange={(e) => setEditFields(f => ({ ...f, document_number: e.target.value }))}
+                            />
+                            <Input
+                                label={t('opening_balance')}
+                                type="number"
+                                value={editFields.opening_balance ?? ''}
+                                onChange={(e) => setEditFields(f => ({ ...f, opening_balance: e.target.value }))}
+                            />
+                            <Select
+                                label={t('payment_method')}
+                                options={paymentOptions}
+                                value={editFields.payment_method ?? ''}
+                                onChange={(e) => setEditFields(f => ({ ...f, payment_method: e.target.value }))}
+                                placeholder={t('select_payment_method')}
+                            />
+                        </div>
+                        <Textarea
+                            label={t('statement')}
+                            value={editFields.statement ?? ''}
+                            onChange={(e) => setEditFields(f => ({ ...f, statement: e.target.value }))}
+                        />
+                        <div className="flex justify-end gap-3 pt-3 border-t border-slate-100 dark:border-slate-700">
+                            <Button variant="secondary" onClick={() => setEditTarget(null)}>{t('btn_cancel')}</Button>
+                            <Button onClick={saveEdit} loading={editLoading}>{t('btn_save')}</Button>
+                        </div>
+                    </div>
+                )}
+            </Modal>
+
             {/* Delete Modal */}
             <Modal open={!!deleteTarget} onClose={() => { setDeleteTarget(null); setDeletePassword(''); }} title={t('delete_confirmation_title')}>
-                <p className="text-sm text-gray-600 mb-4">{t('delete_confirmation_message')}</p>
+                <p className="text-sm text-slate-600 dark:text-slate-400 mb-4">{t('delete_confirmation_message')}</p>
                 {deleteTarget && <p className="text-sm font-medium mb-4">{deleteTarget.code} - {deleteTarget.name}</p>}
                 <Input type="password" value={deletePassword} onChange={(e) => setDeletePassword(e.target.value)} placeholder={t('placeholder_delete_password')} label={t('delete_password_label')} />
                 <div className="flex justify-end gap-3 mt-5">

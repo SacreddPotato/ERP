@@ -24,9 +24,12 @@ class SettingsController extends Controller
         return response()->json(['success' => true, 'factory' => $factory]);
     }
 
-    public function translations(): JsonResponse
+    public function translations(Request $request): JsonResponse
     {
-        $locale = app()->getLocale();
+        $locale = $request->query('locale', session('locale', app()->getLocale()));
+        if (!in_array($locale, ['en', 'ar'])) {
+            $locale = 'en';
+        }
         $path = lang_path("{$locale}.json");
         $translations = file_exists($path) ? json_decode(file_get_contents($path), true) : [];
         return response()->json($translations);

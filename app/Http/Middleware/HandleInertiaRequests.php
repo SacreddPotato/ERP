@@ -35,9 +35,16 @@ class HandleInertiaRequests extends Middleware
      */
     public function share(Request $request): array
     {
+        $locale = session('locale', app()->getLocale());
+        app()->setLocale($locale);
+
+        $path = lang_path("{$locale}.json");
+        $translations = file_exists($path) ? json_decode(file_get_contents($path), true) : [];
+
         return [
             ...parent::share($request),
-            'locale' => app()->getLocale(),
+            'locale' => $locale,
+            'translations' => $translations,
             'factory' => session('current_factory', config('enterprisflow.default_factory')),
             'factories' => config('enterprisflow.factories'),
             'appVersion' => config('enterprisflow.version'),

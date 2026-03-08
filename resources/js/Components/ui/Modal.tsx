@@ -22,9 +22,9 @@ export function Modal({ open, onClose, title, children, maxWidth = 'md' }: Modal
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
             <div className="fixed inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
-            <div className={`relative bg-white rounded-2xl shadow-2xl ${widths[maxWidth]} w-full p-6 animate-in fade-in zoom-in-95 duration-200`}>
+            <div className={`relative bg-white dark:bg-slate-800 rounded-2xl shadow-2xl ${widths[maxWidth]} w-full p-6 animate-in fade-in zoom-in-95 duration-200`}>
                 {title && (
-                    <h3 className="text-lg font-semibold text-gray-900 mb-4">{title}</h3>
+                    <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100 mb-4">{title}</h3>
                 )}
                 {children}
             </div>

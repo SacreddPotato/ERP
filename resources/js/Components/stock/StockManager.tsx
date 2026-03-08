@@ -145,16 +145,16 @@ export default function StockManager() {
 
                 {/* Existing Item Info */}
                 {existingItem && (
-                    <div className="bg-indigo-50 rounded-xl p-5 mb-6 border border-indigo-100">
+                    <div className="bg-indigo-50 dark:bg-indigo-900/20 rounded-xl p-5 mb-6 border border-indigo-100 dark:border-indigo-800">
                         <div className="flex items-center gap-2 mb-3">
                             <Badge variant="info">{existingItem.item_code}</Badge>
-                            <span className="text-sm font-semibold text-gray-800">{existingItem.name}</span>
+                            <span className="text-sm font-semibold text-slate-800 dark:text-slate-200">{existingItem.name}</span>
                         </div>
                         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
-                            <div><span className="text-gray-500">{t('info_category')}</span> <span className="font-medium">{existingItem.category}</span></div>
-                            <div><span className="text-gray-500">{t('info_current_stock')}</span> <span className="font-bold text-indigo-700">{existingItem.net_stock}</span></div>
-                            <div><span className="text-gray-500">{t('info_price')}</span> <span className="font-medium">{Number(existingItem.unit_price).toFixed(2)}</span></div>
-                            <div><span className="text-gray-500">{t('info_min_stock')}</span> <span className="font-medium">{existingItem.min_stock}</span></div>
+                            <div><span className="text-slate-500 dark:text-slate-400">{t('info_category')}</span> <span className="font-medium">{existingItem.category}</span></div>
+                            <div><span className="text-slate-500 dark:text-slate-400">{t('info_current_stock')}</span> <span className="font-bold text-indigo-700 dark:text-indigo-400">{existingItem.net_stock}</span></div>
+                            <div><span className="text-slate-500 dark:text-slate-400">{t('info_price')}</span> <span className="font-medium">{Number(existingItem.unit_price).toFixed(2)}</span></div>
+                            <div><span className="text-slate-500 dark:text-slate-400">{t('info_min_stock')}</span> <span className="font-medium">{existingItem.min_stock}</span></div>
                         </div>
                     </div>
                 )}
@@ -174,7 +174,7 @@ export default function StockManager() {
                         <Input label={t('min_stock')} type="number" value={minStock} onChange={(e) => setMinStock(e.target.value)} placeholder={t('placeholder_min_stock')} />
                         <Input label={t('starting_balance_date')} type="date" value={balanceDate} onChange={(e) => setBalanceDate(e.target.value)} hint={t('hint_balance_date')} />
                     </div>
-                    <div className="flex justify-end mt-6 pt-5 border-t border-gray-100">
+                    <div className="flex justify-end mt-6 pt-5 border-t border-slate-200 dark:border-slate-700">
                         <Button onClick={addItem} loading={loading} size="lg">{t('btn_add_item')}</Button>
                     </div>
                 </Card>
@@ -220,7 +220,7 @@ export default function StockManager() {
                     <div className="mt-5">
                         <Textarea label={t('th_notes')} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder={t('placeholder_notes')} />
                     </div>
-                    <div className="flex justify-end mt-6 pt-5 border-t border-gray-100">
+                    <div className="flex justify-end mt-6 pt-5 border-t border-slate-200 dark:border-slate-700">
                         <Button onClick={updateStock} loading={loading} size="lg">{t('btn_update_stock')}</Button>
                     </div>
                 </Card>

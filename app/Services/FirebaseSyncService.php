@@ -15,25 +15,168 @@ use App\Models\Supplier;
 use App\Models\TransactionLog;
 use App\Models\TreasuryAccount;
 use App\Models\TreasuryConfig;
+use Google\Auth\Credentials\ServiceAccountCredentials;
+use GuzzleHttp\Client;
 use Illuminate\Support\Facades\DB;
-use Kreait\Firebase\Factory as FirebaseFactory;
-use Kreait\Firebase\Contract\Firestore;
 
 class FirebaseSyncService
 {
-    protected Firestore $firestore;
+    protected Client $http;
+    protected string $baseUrl;
+    protected string $accessToken;
     protected const BATCH_SIZE = 500;
 
     public function __construct()
     {
-        $factory = (new FirebaseFactory)
-            ->withServiceAccount(config('firebase.credentials'))
-            ->withProjectId(config('firebase.project_id'))
-            ->withFirestoreClientConfig([
-                'transport' => extension_loaded('grpc') ? 'grpc' : 'rest',
-            ]);
+        $credentialsPath = config('firebase.credentials');
+        $projectId = config('firebase.project_id');
 
-        $this->firestore = $factory->createFirestore();
+        $creds = new ServiceAccountCredentials(
+            ['https://www.googleapis.com/auth/datastore'],
+            json_decode(file_get_contents($credentialsPath), true)
+        );
+        $token = $creds->fetchAuthToken();
+        $this->accessToken = $token['access_token'];
+
+        $this->baseUrl = "https://firestore.googleapis.com/v1/projects/{$projectId}/databases/(default)/documents";
+        $this->http = new Client(['timeout' => 60]);
+    }
+
+    protected function headers(): array
+    {
+        return [
+            'Authorization' => "Bearer {$this->accessToken}",
+            'Content-Type' => 'application/json',
+        ];
+    }
+
+    // ─── Firestore collection name mapping ─────────────────────────
+
+    protected function firestoreLedgerName(LedgerType $type): string
+    {
+        return match ($type) {
+            LedgerType::Customer => 'customers',
+            LedgerType::Supplier => 'suppliers',
+            default => $type->value,
+        };
+    }
+
+    // ─── Firestore REST helpers ──────────────────────────────────────
+
+    protected function getAllDocuments(string $collectionPath): array
+    {
+        $documents = [];
+        $pageToken = null;
+
+        do {
+            $url = "{$this->baseUrl}/{$collectionPath}?pageSize=300";
+            if ($pageToken) {
+                $url .= "&pageToken={$pageToken}";
+            }
+
+            $response = $this->http->get($url, ['headers' => $this->headers()]);
+            $data = json_decode($response->getBody(), true);
+
+            if (isset($data['documents'])) {
+                foreach ($data['documents'] as $doc) {
+                    $docId = basename($doc['name']);
+                    $documents[$docId] = $this->decodeFields($doc['fields'] ?? []);
+                }
+            }
+
+            $pageToken = $data['nextPageToken'] ?? null;
+        } while ($pageToken);
+
+        return $documents;
+    }
+
+    protected function getDocument(string $documentPath): ?array
+    {
+        try {
+            $response = $this->http->get("{$this->baseUrl}/{$documentPath}", [
+                'headers' => $this->headers(),
+            ]);
+            $data = json_decode($response->getBody(), true);
+            return $this->decodeFields($data['fields'] ?? []);
+        } catch (\GuzzleHttp\Exception\ClientException $e) {
+            if ($e->getResponse()->getStatusCode() === 404) {
+                return null;
+            }
+            throw $e;
+        }
+    }
+
+    protected function setDocument(string $documentPath, array $data): void
+    {
+        $this->http->patch("{$this->baseUrl}/{$documentPath}", [
+            'headers' => $this->headers(),
+            'json' => ['fields' => $this->encodeFields($data)],
+        ]);
+    }
+
+    protected function batchWrite(array $writes): void
+    {
+        $projectId = config('firebase.project_id');
+        $url = "https://firestore.googleapis.com/v1/projects/{$projectId}/databases/(default)/documents:batchWrite";
+
+        foreach (array_chunk($writes, self::BATCH_SIZE) as $chunk) {
+            $this->http->post($url, [
+                'headers' => $this->headers(),
+                'json' => ['writes' => $chunk],
+            ]);
+        }
+    }
+
+    protected function decodeFields(array $fields): array
+    {
+        $result = [];
+        foreach ($fields as $key => $value) {
+            $result[$key] = $this->decodeValue($value);
+        }
+        return $result;
+    }
+
+    protected function decodeValue(array $value): mixed
+    {
+        if (isset($value['stringValue'])) return $value['stringValue'];
+        if (isset($value['integerValue'])) return (string) $value['integerValue'];
+        if (isset($value['doubleValue'])) return (string) $value['doubleValue'];
+        if (isset($value['booleanValue'])) return $value['booleanValue'];
+        if (isset($value['nullValue'])) return null;
+        if (isset($value['timestampValue'])) return $value['timestampValue'];
+        if (isset($value['arrayValue'])) {
+            return array_map(fn($v) => $this->decodeValue($v), $value['arrayValue']['values'] ?? []);
+        }
+        if (isset($value['mapValue'])) {
+            return $this->decodeFields($value['mapValue']['fields'] ?? []);
+        }
+        return null;
+    }
+
+    protected function encodeFields(array $data): array
+    {
+        $fields = [];
+        foreach ($data as $key => $value) {
+            $fields[$key] = $this->encodeValue($value);
+        }
+        return $fields;
+    }
+
+    protected function encodeValue(mixed $value): array
+    {
+        if (is_null($value)) return ['nullValue' => null];
+        if (is_bool($value)) return ['booleanValue' => $value];
+        if (is_int($value)) return ['integerValue' => (string) $value];
+        if (is_float($value)) return ['doubleValue' => $value];
+        if (is_string($value)) return ['stringValue' => $value];
+        if ($value instanceof \DateTimeInterface) return ['stringValue' => $value->toIso8601String()];
+        if (is_array($value)) {
+            if (array_is_list($value)) {
+                return ['arrayValue' => ['values' => array_map(fn($v) => $this->encodeValue($v), $value)]];
+            }
+            return ['mapValue' => ['fields' => $this->encodeFields($value)]];
+        }
+        return ['stringValue' => (string) $value];
     }
 
     // ─── PUSH ───────────────────────────────────────────────────────
@@ -73,50 +216,53 @@ class FirebaseSyncService
 
     protected function pushStock(): int
     {
-        $db = $this->firestore->database();
-        $count = 0;
+        $writes = [];
+        $projectId = config('firebase.project_id');
 
         foreach (Factory::cases() as $factory) {
             $items = StockItem::forFactory($factory->value)->get();
-            $batches = $items->chunk(self::BATCH_SIZE);
-
-            foreach ($batches as $chunk) {
-                $batch = $db->bulkWriter();
-                foreach ($chunk as $item) {
-                    $ref = $db->collection('stock')->document($factory->value)
-                        ->collection('items')->document($item->item_code);
-                    $batch->set($ref, $this->stockItemToFirestore($item));
-                    $count++;
-                }
-                $batch->flush();
+            foreach ($items as $item) {
+                $docPath = "projects/{$projectId}/databases/(default)/documents/stock/{$factory->value}/items/{$item->item_code}";
+                $writes[] = [
+                    'update' => [
+                        'name' => $docPath,
+                        'fields' => $this->encodeFields($this->stockItemToFirestore($item)),
+                    ],
+                ];
             }
         }
 
-        return $count;
+        $this->batchWrite($writes);
+        return count($writes);
     }
 
     protected function pushLedgerEntities(LedgerType $type): int
     {
-        $db = $this->firestore->database();
         $model = $type->modelClass();
         $column = $type->codeColumn();
-        $collectionPath = "ledgers/{$type->value}/entries";
-
         $entities = $model::all();
-        $count = 0;
+        $writes = [];
+        $projectId = config('firebase.project_id');
+        $fsName = $this->firestoreLedgerName($type);
 
-        foreach ($entities->chunk(self::BATCH_SIZE) as $chunk) {
-            $batch = $db->bulkWriter();
-            foreach ($chunk as $entity) {
-                $ref = $db->collection('ledgers')->document($type->value)
-                    ->collection('entries')->document($entity->{$column});
-                $batch->set($ref, $entity->toArray());
-                $count++;
+        foreach ($entities as $entity) {
+            $docPath = "projects/{$projectId}/databases/(default)/documents/ledgers/{$fsName}/entries/{$entity->{$column}}";
+            $data = $entity->toArray();
+            foreach ($data as $key => $value) {
+                if ($value instanceof \DateTimeInterface) {
+                    $data[$key] = $value->toIso8601String();
+                }
             }
-            $batch->flush();
+            $writes[] = [
+                'update' => [
+                    'name' => $docPath,
+                    'fields' => $this->encodeFields($data),
+                ],
+            ];
         }
 
-        return $count;
+        $this->batchWrite($writes);
+        return count($writes);
     }
 
     protected function pushTreasuryConfig(): int
@@ -124,9 +270,13 @@ class FirebaseSyncService
         $config = TreasuryConfig::current();
         if (!$config) return 0;
 
-        $db = $this->firestore->database();
-        $ref = $db->collection('settings')->document('treasury_config');
-        $ref->set($config->toArray());
+        $data = $config->toArray();
+        foreach ($data as $key => $value) {
+            if ($value instanceof \DateTimeInterface) {
+                $data[$key] = $value->toIso8601String();
+            }
+        }
+        $this->setDocument('settings/treasury_config', $data);
         return 1;
     }
 
@@ -175,28 +325,28 @@ class FirebaseSyncService
 
     protected function pushTransactionCollection($records, string $collectionName, callable $docIdFn): int
     {
-        $db = $this->firestore->database();
-        $count = 0;
+        $writes = [];
+        $projectId = config('firebase.project_id');
 
-        foreach ($records->chunk(self::BATCH_SIZE) as $chunk) {
-            $batch = $db->bulkWriter();
-            foreach ($chunk as $record) {
-                $docId = $docIdFn($record);
-                $ref = $db->collection($collectionName)->document($docId);
-                $data = $record->toArray();
-                // Convert datetime objects to strings
-                foreach ($data as $key => $value) {
-                    if ($value instanceof \DateTimeInterface) {
-                        $data[$key] = $value->toIso8601String();
-                    }
+        foreach ($records as $record) {
+            $docId = $docIdFn($record);
+            $docPath = "projects/{$projectId}/databases/(default)/documents/{$collectionName}/{$docId}";
+            $data = $record->toArray();
+            foreach ($data as $key => $value) {
+                if ($value instanceof \DateTimeInterface) {
+                    $data[$key] = $value->toIso8601String();
                 }
-                $batch->set($ref, $data);
-                $count++;
             }
-            $batch->flush();
+            $writes[] = [
+                'update' => [
+                    'name' => $docPath,
+                    'fields' => $this->encodeFields($data),
+                ],
+            ];
         }
 
-        return $count;
+        $this->batchWrite($writes);
+        return count($writes);
     }
 
     // ─── PULL ───────────────────────────────────────────────────────
@@ -233,6 +383,20 @@ class FirebaseSyncService
             }
         }
 
+        // Auto-fix: if treasury accounts exist but config says not initialized, correct it
+        if (TreasuryAccount::exists()) {
+            $config = TreasuryConfig::first();
+            if ($config && !$config->initialized) {
+                $config->update(['initialized' => true]);
+            } elseif (!$config) {
+                TreasuryConfig::create([
+                    'initialized' => true,
+                    'starting_capital' => 0,
+                    'currency' => 'EGP',
+                ]);
+            }
+        }
+
         return $stats;
     }
 
@@ -257,20 +421,20 @@ class FirebaseSyncService
 
     protected function pullStock(bool $skipExisting): array
     {
-        $db = $this->firestore->database();
         $pulled = 0;
         $skipped = 0;
 
         foreach (Factory::cases() as $factory) {
-            $docs = $db->collection('stock')->document($factory->value)
-                ->collection('items')->documents();
+            try {
+                $docs = $this->getAllDocuments("stock/{$factory->value}/items");
+            } catch (\Throwable) {
+                continue;
+            }
 
-            foreach ($docs as $doc) {
-                if (!$doc->exists()) continue;
-                $data = $doc->data();
+            foreach ($docs as $docId => $data) {
                 $data['factory'] = $factory->value;
-                $data['item_code'] = $data['id'] ?? $doc->id();
-                unset($data['id']);
+                $data['item_code'] = $data['id'] ?? $docId;
+                unset($data['id'], $data['lastUpdated'], $data['syncedAt']);
 
                 $existing = StockItem::where('item_code', $data['item_code'])
                     ->where('factory', $factory->value)->first();
@@ -294,21 +458,27 @@ class FirebaseSyncService
 
     protected function pullLedgerEntities(LedgerType $type, bool $skipExisting): array
     {
-        $db = $this->firestore->database();
         $model = $type->modelClass();
         $column = $type->codeColumn();
         $pulled = 0;
         $skipped = 0;
+        $fsName = $this->firestoreLedgerName($type);
 
-        $docs = $db->collection('ledgers')->document($type->value)
-            ->collection('entries')->documents();
+        try {
+            $docs = $this->getAllDocuments("ledgers/{$fsName}/entries");
+        } catch (\Throwable) {
+            return compact('pulled', 'skipped');
+        }
 
-        foreach ($docs as $doc) {
-            if (!$doc->exists()) continue;
-            $data = $doc->data();
-            $code = $data[$column] ?? $data['id'] ?? $doc->id();
+        foreach ($docs as $docId => $data) {
+            $code = $data[$column] ?? $data['id'] ?? $docId;
             $data[$column] = $code;
-            unset($data['id']);
+            unset($data['id'], $data['lastUpdated'], $data['syncedAt']);
+
+            // Clean empty enum values that would fail casting
+            if (isset($data['payment_method']) && $data['payment_method'] === '') {
+                $data['payment_method'] = null;
+            }
 
             $existing = $model::where($column, $code)->first();
             if ($existing && $skipExisting) {
@@ -316,12 +486,16 @@ class FirebaseSyncService
                 continue;
             }
 
-            if ($existing) {
-                $existing->update($data);
-            } else {
-                $model::create($data);
+            try {
+                if ($existing) {
+                    $existing->update($data);
+                } else {
+                    $model::create($data);
+                }
+                $pulled++;
+            } catch (\Throwable) {
+                $skipped++;
             }
-            $pulled++;
         }
 
         return compact('pulled', 'skipped');
@@ -329,14 +503,13 @@ class FirebaseSyncService
 
     protected function pullTreasuryConfig(bool $skipExisting): array
     {
-        $db = $this->firestore->database();
-        $doc = $db->collection('settings')->document('treasury_config')->snapshot();
+        $data = $this->getDocument('settings/treasury_config');
 
-        if (!$doc->exists()) {
+        if (!$data) {
             return ['pulled' => 0, 'skipped' => 0];
         }
 
-        $data = $doc->data();
+        unset($data['lastUpdated'], $data['syncedAt']);
         $existing = TreasuryConfig::first();
 
         if ($existing && $skipExisting) {
@@ -403,16 +576,32 @@ class FirebaseSyncService
 
     protected function pullTransactionCollection(string $collectionName, string $modelClass, array $dedupKeys, bool $skipExisting): array
     {
-        $db = $this->firestore->database();
         $pulled = 0;
         $skipped = 0;
 
-        $docs = $db->collection($collectionName)->documents();
+        try {
+            $docs = $this->getAllDocuments($collectionName);
+        } catch (\Throwable) {
+            return compact('pulled', 'skipped');
+        }
 
-        foreach ($docs as $doc) {
-            if (!$doc->exists()) continue;
-            $data = $doc->data();
-            unset($data['id']);
+        foreach ($docs as $docId => $data) {
+            unset($data['id'], $data['lastUpdated'], $data['syncedAt']);
+
+            // Remap field names from Firestore to local DB columns
+            if (isset($data['entity_id']) && !isset($data['entity_code'])) {
+                $data['entity_code'] = $data['entity_id'];
+                unset($data['entity_id']);
+            }
+            if (isset($data['timestamp']) && !isset($data['logged_at'])) {
+                $data['logged_at'] = $data['timestamp'];
+                unset($data['timestamp']);
+            }
+
+            // Clean empty enum values
+            if (isset($data['payment_method']) && $data['payment_method'] === '') {
+                $data['payment_method'] = null;
+            }
 
             if ($skipExisting && count($dedupKeys) >= 2) {
                 $query = $modelClass::query();
@@ -427,8 +616,12 @@ class FirebaseSyncService
                 }
             }
 
-            $modelClass::create($data);
-            $pulled++;
+            try {
+                $modelClass::create($data);
+                $pulled++;
+            } catch (\Throwable) {
+                $skipped++;
+            }
         }
 
         return compact('pulled', 'skipped');
