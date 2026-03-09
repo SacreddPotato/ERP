@@ -292,11 +292,15 @@ class LedgerService
         if (!empty($filters['statement'])) {
             $query->where('statement', 'like', "%{$filters['statement']}%");
         }
-        if (!empty($filters['date_from'])) {
-            $query->where('registration_date', '>=', $filters['date_from']);
-        }
-        if (!empty($filters['date_to'])) {
-            $query->where('registration_date', '<=', $filters['date_to']);
+        // Date filters: find entities that have transactions in the given date range
+        if (!empty($filters['date_from']) || !empty($filters['date_to'])) {
+            $dateCodes = $this->getEntityCodesInDateRange($type, $filters['date_from'] ?? null, $filters['date_to'] ?? null);
+            if (!empty($dateCodes)) {
+                $query->whereIn($type->codeColumn(), $dateCodes);
+            } else {
+                // No transactions match — return empty
+                $query->whereRaw('0 = 1');
+            }
         }
 
         $column = $type->codeColumn();
@@ -318,17 +322,23 @@ class LedgerService
         ];
     }
 
-    public function getEntityTransactions(string $code, LedgerType $type): Collection
+    public function getEntityTransactions(string $code, LedgerType $type, ?string $dateFrom = null, ?string $dateTo = null): Collection
     {
-        $logs = LedgerLog::where('entity_code', $code)
-            ->where('ledger_type', $type->value)
-            ->get();
+        $logQuery = LedgerLog::where('entity_code', $code)
+            ->where('ledger_type', $type->value);
+        $txnQuery = LedgerTransaction::where('entity_code', $code)
+            ->where('ledger_type', $type->value);
 
-        $txns = LedgerTransaction::where('entity_code', $code)
-            ->where('ledger_type', $type->value)
-            ->get();
+        if ($dateFrom) {
+            $logQuery->where('transaction_date', '>=', $dateFrom);
+            $txnQuery->where('transaction_date', '>=', $dateFrom);
+        }
+        if ($dateTo) {
+            $logQuery->where('transaction_date', '<=', $dateTo);
+            $txnQuery->where('transaction_date', '<=', $dateTo);
+        }
 
-        return $logs->merge($txns)
+        return $logQuery->get()->merge($txnQuery->get())
             ->unique(fn ($item) => ($item->logged_at ?? '') . '|' . $item->entity_code . '|' . $item->debit . '|' . $item->credit)
             ->sortBy([
                 ['transaction_date', 'desc'],
@@ -350,6 +360,26 @@ class LedgerService
             ->distinct()
             ->pluck('entity_code')
             ->toArray();
+
+        return array_values(array_unique(array_merge($logCodes, $txnCodes)));
+    }
+
+    public function getEntityCodesInDateRange(LedgerType $type, ?string $dateFrom, ?string $dateTo): array
+    {
+        $logQuery = LedgerLog::where('ledger_type', $type->value);
+        $txnQuery = LedgerTransaction::where('ledger_type', $type->value);
+
+        if ($dateFrom) {
+            $logQuery->where('transaction_date', '>=', $dateFrom);
+            $txnQuery->where('transaction_date', '>=', $dateFrom);
+        }
+        if ($dateTo) {
+            $logQuery->where('transaction_date', '<=', $dateTo);
+            $txnQuery->where('transaction_date', '<=', $dateTo);
+        }
+
+        $logCodes = $logQuery->distinct()->pluck('entity_code')->toArray();
+        $txnCodes = $txnQuery->distinct()->pluck('entity_code')->toArray();
 
         return array_values(array_unique(array_merge($logCodes, $txnCodes)));
     }

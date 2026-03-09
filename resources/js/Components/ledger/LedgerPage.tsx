@@ -116,7 +116,7 @@ export default function LedgerPage({ type }: LedgerPageProps) {
                 const firstMatch = matchCodes[0];
                 setTxLoading(true);
                 try {
-                    const txRes = await api.get(`/api/ledger/${type}/transactions`, { params: { code: firstMatch } });
+                    const txRes = await api.get(`/api/ledger/${type}/transactions`, { params: { code: firstMatch, date_from: dateFrom || undefined, date_to: dateTo || undefined } });
                     setTransactions(txRes.data);
                     setExpandedCode(firstMatch);
                     setTxSortBy('transaction_date');
@@ -191,7 +191,7 @@ export default function LedgerPage({ type }: LedgerPageProps) {
         }
         setTxLoading(true);
         try {
-            const res = await api.get(`/api/ledger/${type}/transactions`, { params: { code: entityCode } });
+            const res = await api.get(`/api/ledger/${type}/transactions`, { params: { code: entityCode, date_from: dateFrom || undefined, date_to: dateTo || undefined } });
             setTransactions(res.data);
             setExpandedCode(entityCode);
             setTxSortBy('transaction_date');

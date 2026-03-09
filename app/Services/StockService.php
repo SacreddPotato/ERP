@@ -435,12 +435,6 @@ class StockService
             $threshold = (float) $filters['low_stock'];
             $query->where('net_stock', '<=', $threshold);
         }
-        if (!empty($filters['date_from'])) {
-            $query->where('created_at', '>=', $filters['date_from']);
-        }
-        if (!empty($filters['date_to'])) {
-            $query->where('created_at', '<=', $filters['date_to'] . ' 23:59:59');
-        }
 
         $total = $query->count();
         $data = $query->orderBy('item_code')->skip(($page - 1) * $perPage)->take($perPage)->get();

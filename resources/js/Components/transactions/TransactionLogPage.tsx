@@ -34,6 +34,7 @@ interface UnifiedLog {
     document_number: string | null;
     payment_method: string | null;
     is_reversed: boolean;
+    _change: number;
 }
 
 const LOG_CATEGORIES: { id: LogCategory; key: string; icon: string }[] = [
@@ -63,6 +64,7 @@ function stockToUnified(log: TransactionLog): UnifiedLog {
         prev_value: log.previous_stock, new_value: log.new_stock,
         factory: log.factory, detail: log.notes, document_number: log.document_number,
         payment_method: null, is_reversed: (log.notes ?? '').includes('[REVERSED]'),
+        _change: log.quantity ?? 0,
     };
 }
 
@@ -74,6 +76,7 @@ function ledgerToUnified(log: LedgerLog): UnifiedLog {
         prev_value: log.previous_balance, new_value: log.new_balance,
         factory: null, detail: log.statement, document_number: log.document_number,
         payment_method: log.payment_method, is_reversed: (log.statement ?? '').includes('[REVERSED]'),
+        _change: (Number(log.debit) || 0) - (Number(log.credit) || 0),
     };
 }
 
@@ -298,7 +301,13 @@ export default function TransactionLogPage() {
         {
             key: '_change',
             label: t('th_change'),
+            summable: true,
             render: (_v: any, row: any) => {
+                if (!row.source) {
+                    // Sum row
+                    const v = Number(_v) || 0;
+                    return v === 0 ? '-' : fmtNum(v);
+                }
                 if (row.source === 'stock') {
                     const qty = Number(row.quantity) || 0;
                     return qty === 0 ? '-' : fmtInt(qty);

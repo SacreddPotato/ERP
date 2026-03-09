@@ -38,6 +38,12 @@ class LedgerController extends Controller
             }
         }
 
+        // When date filters are active, return matching codes for auto-expand
+        if ($request->filled('date_from') || $request->filled('date_to')) {
+            $dateCodes = $this->service->getEntityCodesInDateRange($ledgerType, $request->input('date_from'), $request->input('date_to'));
+            $txMatchCodes = array_values(array_unique(array_merge($txMatchCodes, $dateCodes)));
+        }
+
         return response()->json([
             'entities' => $result['data'],
             'totals' => $totals,
@@ -95,7 +101,12 @@ class LedgerController extends Controller
     public function transactions(Request $request, string $type): JsonResponse
     {
         $ledgerType = LedgerType::from($type);
-        $transactions = $this->service->getEntityTransactions($request->input('code'), $ledgerType);
+        $transactions = $this->service->getEntityTransactions(
+            $request->input('code'),
+            $ledgerType,
+            $request->input('date_from'),
+            $request->input('date_to'),
+        );
         return response()->json($transactions);
     }
 
