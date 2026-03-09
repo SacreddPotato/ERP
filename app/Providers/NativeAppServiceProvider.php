@@ -17,6 +17,8 @@ class NativeAppServiceProvider implements ProvidesPhpIni
             ->title('EnterprisFlow')
             ->width(1200)
             ->height(800)
+            ->frameless()
+            ->hideMenu(true)
             ->rememberState();
     }
 

@@ -303,10 +303,27 @@ input:focus, select:focus, textarea:focus {
     color: #e2e8f0;
 }
 
-/* Scrollbar styling */
+/* Scrollbar styling — thin, soft, unobtrusive */
+* {
+    scrollbar-width: thin;
+    scrollbar-color: transparent transparent;
+}
+
+*:hover {
+    scrollbar-color: rgba(148, 163, 184, 0.45) transparent;
+}
+
+.dark * {
+    scrollbar-color: transparent transparent;
+}
+
+.dark *:hover {
+    scrollbar-color: rgba(71, 85, 105, 0.5) transparent;
+}
+
 ::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
+    width: 5px;
+    height: 5px;
 }
 
 ::-webkit-scrollbar-track {
@@ -314,18 +331,23 @@ input:focus, select:focus, textarea:focus {
 }
 
 ::-webkit-scrollbar-thumb {
-    background: #cbd5e1;
-    border-radius: 3px;
+    background: transparent;
+    border-radius: 9999px;
+    transition: background 0.3s;
 }
 
-::-webkit-scrollbar-thumb:hover {
-    background: #94a3b8;
+*:hover::-webkit-scrollbar-thumb {
+    background: rgba(148, 163, 184, 0.45);
 }
 
-.dark ::-webkit-scrollbar-thumb {
-    background: #475569;
+*:hover::-webkit-scrollbar-thumb:hover {
+    background: rgba(100, 116, 139, 0.7);
 }
 
-.dark ::-webkit-scrollbar-thumb:hover {
-    background: #64748b;
+.dark *:hover::-webkit-scrollbar-thumb {
+    background: rgba(51, 65, 85, 0.35);
+}
+
+.dark *:hover::-webkit-scrollbar-thumb:hover {
+    background: rgba(71, 85, 105, 0.5);
 }

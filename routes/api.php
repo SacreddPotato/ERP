@@ -127,6 +127,43 @@ Route::post('/open-url', function (\Illuminate\Http\Request $request) {
     }
 });
 
+// Window controls (frameless mode)
+Route::post('/window/minimize', function () {
+    try {
+        \Native\Laravel\Facades\Window::minimize();
+        return response()->json(['ok' => true]);
+    } catch (\Throwable $e) {
+        return response()->json(['error' => $e->getMessage()], 500);
+    }
+});
+Route::post('/window/maximize', function () {
+    try {
+        \Native\Laravel\Facades\Window::maximize();
+        return response()->json(['ok' => true]);
+    } catch (\Throwable $e) {
+        return response()->json(['error' => $e->getMessage()], 500);
+    }
+});
+Route::post('/window/close', function () {
+    try {
+        \Native\Laravel\Facades\Window::close();
+        return response()->json(['ok' => true]);
+    } catch (\Throwable $e) {
+        return response()->json(['error' => $e->getMessage()], 500);
+    }
+});
+
+Route::post('/zoom', function (\Illuminate\Http\Request $request) {
+    $factor = (float) $request->input('factor', 1.0);
+    $factor = max(0.5, min(2.0, $factor)); // Clamp between 50% and 200%
+    try {
+        \Native\Laravel\Facades\Window::zoomFactor($factor);
+        return response()->json(['ok' => true, 'factor' => $factor]);
+    } catch (\Throwable $e) {
+        return response()->json(['error' => $e->getMessage()], 500);
+    }
+});
+
 Route::get('/update-status', function () {
     return response()->json(
         \Illuminate\Support\Facades\Cache::get('update_status', ['status' => 'idle'])
