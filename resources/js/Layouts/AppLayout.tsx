@@ -30,7 +30,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
     };
 
     return (
-        <div className="min-h-screen bg-gradient-to-b from-slate-50 to-slate-100/80 dark:from-slate-900 dark:to-slate-950 transition-colors duration-300">
+        <div className="min-h-screen flex flex-col bg-gradient-to-b from-slate-50 to-slate-100/80 dark:from-slate-900 dark:to-slate-950 transition-colors duration-300">
             <ToastContainer />
 
             {/* Header */}
@@ -114,12 +114,12 @@ export default function AppLayout({ children }: AppLayoutProps) {
             </header>
 
             {/* Main Content */}
-            <main className="max-w-[1600px] mx-auto px-6 py-6">
+            <main className="flex-1 max-w-[1600px] w-full mx-auto px-6 py-6">
                 {children}
             </main>
 
             {/* Footer */}
-            <footer className="border-t border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 mt-8">
+            <footer className="border-t border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 mt-auto">
                 <div className="max-w-[1600px] mx-auto px-6 py-3 flex items-center justify-between">
                     <span className="text-xs text-slate-400 dark:text-slate-500">v{appVersion}</span>
                     <p className="text-xs text-slate-400 dark:text-slate-500">{t('footer_contact')}</p>
