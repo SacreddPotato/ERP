@@ -5,6 +5,8 @@
     "btn_check_updates": "Check for Updates",
     "update_checking": "Checking for updates...",
     "update_check_failed": "Could not check for updates",
+    "update_available": "Update available: v:version — downloading...",
+    "update_up_to_date": "You're up to date (v:version)",
 
     "btn_pull": "Download",
     "btn_push": "Upload",

@@ -14,8 +14,15 @@ export default function AppLayout({ children }: AppLayoutProps) {
     const checkForUpdates = async () => {
         setCheckingUpdate(true);
         try {
-            await api.post('/api/check-for-updates');
-            toast(t('update_checking'), 'info');
+            const res = await api.post('/api/check-for-updates');
+            const data = res.data as { current?: string; latest?: string; has_update?: boolean; error?: string };
+            if (data.error) {
+                toast(data.error, 'error');
+            } else if (data.has_update) {
+                toast(t('update_available', { version: data.latest || '' }), 'success');
+            } else {
+                toast(t('update_up_to_date', { version: data.current || appVersion }), 'info');
+            }
         } catch {
             toast(t('update_check_failed'), 'error');
         }

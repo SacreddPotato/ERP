@@ -59,14 +59,45 @@ Route::prefix('sync')->group(function () {
 });
 
 // App info & updates
-Route::get('/app-version', function () {
-    return response()->json(['version' => config('nativephp.version')]);
-});
 Route::post('/check-for-updates', function () {
+    $currentVersion = config('nativephp.version');
+    $owner = config('nativephp.updater.providers.github.owner');
+    $repo = config('nativephp.updater.providers.github.repo');
+
     try {
-        \Native\Laravel\Facades\AutoUpdater::checkForUpdates();
-        return response()->json(['status' => 'checking']);
+        $response = \Illuminate\Support\Facades\Http::withHeaders([
+            'Accept' => 'application/vnd.github+json',
+        ])->get("https://api.github.com/repos/{$owner}/{$repo}/releases/latest");
+
+        if ($response->failed()) {
+            return response()->json([
+                'current' => $currentVersion,
+                'error' => 'Could not reach GitHub',
+            ], 502);
+        }
+
+        $latestTag = $response->json('tag_name');
+        $latestVersion = ltrim($latestTag, 'v');
+        $hasUpdate = version_compare($latestVersion, $currentVersion, '>');
+
+        // Trigger electron-updater download if update available
+        if ($hasUpdate) {
+            try {
+                \Native\Laravel\Facades\AutoUpdater::checkForUpdates();
+            } catch (\Throwable $e) {
+                // Updater not available in dev mode
+            }
+        }
+
+        return response()->json([
+            'current' => $currentVersion,
+            'latest' => $latestVersion,
+            'has_update' => $hasUpdate,
+        ]);
     } catch (\Throwable $e) {
-        return response()->json(['error' => $e->getMessage()], 500);
+        return response()->json([
+            'current' => $currentVersion,
+            'error' => $e->getMessage(),
+        ], 500);
     }
 });

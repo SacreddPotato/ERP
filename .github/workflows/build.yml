@@ -45,14 +45,23 @@ jobs:
 
       - name: Configure NativePHP updater
         run: |
+          # Remove existing entries to avoid dotenv immutable first-value-wins conflict
+          sed -i '/^NATIVEPHP_APP_VERSION=/d' .env
+          sed -i '/^NATIVEPHP_UPDATER_ENABLED=/d' .env
+          sed -i '/^NATIVEPHP_UPDATER_PROVIDER=/d' .env
+          sed -i '/^GITHUB_REPO=/d' .env
+          sed -i '/^GITHUB_OWNER=/d' .env
+          sed -i '/^GITHUB_TOKEN=/d' .env
+          sed -i '/^GITHUB_RELEASE_TYPE=/d' .env
+          # Now append the correct values
+          VERSION=${GITHUB_REF_NAME#v}
+          echo NATIVEPHP_APP_VERSION=$VERSION >> .env
           echo NATIVEPHP_UPDATER_ENABLED=true >> .env
           echo NATIVEPHP_UPDATER_PROVIDER=github >> .env
           echo GITHUB_REPO=ERP >> .env
           echo GITHUB_OWNER=SacreddPotato >> .env
           echo GITHUB_RELEASE_TYPE=release >> .env
           echo GITHUB_TOKEN=${{ github.token }} >> .env
-          VERSION=${GITHUB_REF_NAME#v}
-          echo NATIVEPHP_APP_VERSION=$VERSION >> .env
         shell: bash
 
       - name: Write Firebase credentials
