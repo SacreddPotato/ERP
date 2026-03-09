@@ -13,6 +13,7 @@ interface AppContextType {
     isRtl: boolean;
     darkMode: boolean;
     toggleDarkMode: () => void;
+    appVersion: string;
 }
 
 const AppContext = createContext<AppContextType | null>(null);
@@ -24,6 +25,7 @@ interface AppProviderProps {
         factory?: string;
         factories?: string[];
         translations?: Record<string, string>;
+        appVersion?: string;
     };
 }
 
@@ -41,6 +43,7 @@ export function AppProvider({ children, pageProps }: AppProviderProps) {
     const [translations, setTranslations] = useState<Record<string, string>>(pageProps.translations || {});
     const [darkMode, setDarkMode] = useState(getInitialDarkMode);
     const factories = pageProps.factories || ['bahbit', 'old_factory', 'station', 'thaabaneya'];
+    const appVersion = pageProps.appVersion || '1.0.0';
 
     const fetchTranslations = useCallback(async (lang: string) => {
         try {
@@ -102,7 +105,7 @@ export function AppProvider({ children, pageProps }: AppProviderProps) {
     const isRtl = locale === 'ar';
 
     return (
-        <AppContext.Provider value={{ locale, setLocale, factory, setFactory, factories, t, translations, isRtl, darkMode, toggleDarkMode }}>
+        <AppContext.Provider value={{ locale, setLocale, factory, setFactory, factories, t, translations, isRtl, darkMode, toggleDarkMode, appVersion }}>
             {children}
         </AppContext.Provider>
     );

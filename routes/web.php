@@ -10,5 +10,6 @@ Route::get('/{any?}', function () {
 
     return Inertia::render('Dashboard', [
         'translations' => $translations,
+        'appVersion' => config('nativephp.version'),
     ]);
 })->where('any', '.*')->name('home');

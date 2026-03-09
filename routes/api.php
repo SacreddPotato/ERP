@@ -57,3 +57,16 @@ Route::prefix('sync')->group(function () {
     Route::post('/push', [SyncController::class, 'push']);
     Route::post('/force-pull', [SyncController::class, 'forcePull']);
 });
+
+// App info & updates
+Route::get('/app-version', function () {
+    return response()->json(['version' => config('nativephp.version')]);
+});
+Route::post('/check-for-updates', function () {
+    try {
+        \Native\Laravel\Facades\AutoUpdater::checkForUpdates();
+        return response()->json(['status' => 'checking']);
+    } catch (\Throwable $e) {
+        return response()->json(['error' => $e->getMessage()], 500);
+    }
+});
