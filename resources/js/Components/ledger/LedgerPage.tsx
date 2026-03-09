@@ -1,8 +1,9 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useApp } from '../../contexts/AppContext';
 import { Card, CardHeader } from '../ui/Card';
 import { Button } from '../ui/Button';
 import { Input, Select, Textarea } from '../ui/Input';
+import { DatePickerInput } from '../ui/DatePickerInput';
 import { StatCard } from '../ui/StatCard';
 import { Badge } from '../ui/Badge';
 import { Modal } from '../ui/Modal';
@@ -78,6 +79,12 @@ export default function LedgerPage({ type }: LedgerPageProps) {
     // Per-entity tx export modal
     const [txExport, setTxExport] = useState<{ code: string; name: string; entity: LedgerEntity; data: LedgerLog[] } | null>(null);
 
+    // Transaction document_number match codes (for auto-expand + highlight)
+    const [txMatchCodes, setTxMatchCodes] = useState<string[]>([]);
+
+    // Ref for scrolling to entry form
+    const entryFormRef = useRef<HTMLDivElement>(null);
+
     // Edit modal
     const [editTarget, setEditTarget] = useState<LedgerEntity | null>(null);
     const [editFields, setEditFields] = useState<Record<string, any>>({});
@@ -93,6 +100,25 @@ export default function LedgerPage({ type }: LedgerPageProps) {
             const res = await api.get(`/api/ledger/${type}`, { params: { search } });
             setEntities(res.data.entities);
             setTotals(res.data.totals);
+            const matchCodes: string[] = res.data.tx_match_codes ?? [];
+            setTxMatchCodes(matchCodes);
+
+            // Auto-expand first entity with matching transaction document_numbers
+            if (matchCodes.length > 0) {
+                const firstMatch = matchCodes[0];
+                setTxLoading(true);
+                try {
+                    const txRes = await api.get(`/api/ledger/${type}/transactions`, { params: { code: firstMatch } });
+                    setTransactions(txRes.data);
+                    setExpandedCode(firstMatch);
+                    setTxSortBy('transaction_date');
+                    setTxSortDir('desc');
+                } catch {}
+                setTxLoading(false);
+            } else if (search) {
+                // Collapse if no tx matches when searching
+                setExpandedCode(null);
+            }
         } catch { toast(t('sync_failed'), 'error'); }
         setLoading(false);
     }, [type, search, t]);
@@ -111,8 +137,13 @@ export default function LedgerPage({ type }: LedgerPageProps) {
         try {
             const res = await api.post(`/api/ledger/${type}/check-code`, { code });
             setIsExisting(res.data.exists);
-            if (res.data.exists) toast(t('account_exists'), 'info');
-            else toast(t('account_new'), 'info');
+            if (res.data.exists) {
+                const entity = res.data.entity;
+                if (entity) setEntityName(entity[cfg.nameColumn] || '');
+                toast(t('account_exists'), 'info');
+            } else {
+                toast(t('account_new'), 'info');
+            }
         } catch { toast(t('sync_failed'), 'error'); }
     };
 
@@ -123,7 +154,7 @@ export default function LedgerPage({ type }: LedgerPageProps) {
     };
 
     const save = async () => {
-        if (!code || !entityName) { toast(t('msg_fill_all'), 'warning'); return; }
+        if (!code || (!isExisting && !entityName)) { toast(t('msg_fill_all'), 'warning'); return; }
         setLoading(true);
         try {
             const data: Record<string, any> = {
@@ -227,6 +258,18 @@ export default function LedgerPage({ type }: LedgerPageProps) {
         } catch (e: any) { toast(e.response?.data?.message || t('msg_wrong_password'), 'error'); }
     };
 
+    const prefillEntry = (entityCode: string) => {
+        const entity = entities.find(e => e[cfg.codeColumn] === entityCode);
+        setCode(entityCode);
+        setEntityName(entity?.[cfg.nameColumn] || '');
+        setIsExisting(true);
+        setDebit(''); setCredit(''); setDocumentNumber(''); setStatement(''); setPaymentMethod('');
+        setRegistrationDate('');
+        setTimeout(() => {
+            entryFormRef.current?.scrollIntoView({ behavior: 'smooth' });
+        }, 50);
+    };
+
     const paymentOptions = PAYMENT_METHODS.map(p => ({ value: p.value, label: t(p.labelKey) }));
 
     const exportColumns: ColumnDef[] = [
@@ -243,6 +286,7 @@ export default function LedgerPage({ type }: LedgerPageProps) {
         { key: 'transaction_date', label: t('th_trans_date'), render: (v: any) => fmtDate(v) },
         { key: 'logged_at', label: t('th_logged_at'), render: (v: any) => fmtDateTime(v) },
         { key: 'transaction_type', label: t('th_type'), render: (v: any) => v || '' },
+        { key: 'document_number', label: t('th_doc_number'), render: (v: any) => v || '-' },
         { key: 'debit', label: t('th_debit'), render: (v: any) => fmtNum(v), summable: true },
         { key: 'credit', label: t('th_credit'), render: (v: any) => fmtNum(v), summable: true },
         { key: 'new_balance', label: t('th_balance'), render: (v: any) => fmtNum(v) },
@@ -283,6 +327,7 @@ export default function LedgerPage({ type }: LedgerPageProps) {
             </div>
 
             {/* Entry Form */}
+            <div ref={entryFormRef}>
             <Card>
                 <CardHeader title={t(cfg.entryKey)} />
 
@@ -296,14 +341,19 @@ export default function LedgerPage({ type }: LedgerPageProps) {
 
                 {code && (
                     <>
-                        {isExisting && <Badge variant="info">{t('account_exists')}</Badge>}
+                        {isExisting && (
+                            <div className="flex items-center gap-3 mb-4">
+                                <Badge variant="info">{t('transaction_mode')}</Badge>
+                                <span className="text-sm font-semibold text-slate-800 dark:text-slate-200">{entityName}</span>
+                            </div>
+                        )}
                         {!isExisting && code && <Badge variant="success">{t('account_new')}</Badge>}
 
                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5 mt-5">
-                            <Input label={t(cfg.nameKey)} value={entityName} onChange={(e) => setEntityName(e.target.value)} placeholder={t(cfg.namePlaceholder)} />
-                            {cfg.hasPhone && <Input label={t('employee_phone')} value={phone} onChange={(e) => setPhone(e.target.value)} placeholder={t('placeholder_phone')} />}
-                            {cfg.hasEmail && <Input label={t('customer_email')} type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder={t('placeholder_email')} />}
-                            <Input label={t('registration_date')} type="date" value={registrationDate} onChange={(e) => setRegistrationDate(e.target.value)} />
+                            {!isExisting && <Input label={t(cfg.nameKey)} value={entityName} onChange={(e) => setEntityName(e.target.value)} placeholder={t(cfg.namePlaceholder)} />}
+                            {!isExisting && cfg.hasPhone && <Input label={t('employee_phone')} value={phone} onChange={(e) => setPhone(e.target.value)} placeholder={t('placeholder_phone')} />}
+                            {!isExisting && cfg.hasEmail && <Input label={t('customer_email')} type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder={t('placeholder_email')} />}
+                            <DatePickerInput label={isExisting ? t('transaction_date') : t('registration_date')} value={registrationDate} onChange={setRegistrationDate} />
                             <Input label={t('document_number')} value={documentNumber} onChange={(e) => setDocumentNumber(e.target.value)} placeholder={t('placeholder_document_number')} />
                             {!isExisting && <Input label={t('opening_balance')} type="number" value={openingBalance} onChange={(e) => setOpeningBalance(e.target.value)} placeholder={t('placeholder_opening_balance')} />}
                             <Input label={t('debit')} type="number" value={debit} onChange={(e) => setDebit(e.target.value)} placeholder={t('placeholder_debit')} />
@@ -314,11 +364,12 @@ export default function LedgerPage({ type }: LedgerPageProps) {
                             <Textarea label={t('statement')} value={statement} onChange={(e) => setStatement(e.target.value)} placeholder={t('placeholder_statement')} />
                         </div>
                         <div className="flex justify-end mt-6 pt-5 border-t border-slate-200 dark:border-slate-700">
-                            <Button onClick={save} loading={loading} size="lg">{t(cfg.saveKey)}</Button>
+                            <Button onClick={save} loading={loading} size="lg">{isExisting ? t('btn_add_transaction') : t(cfg.saveKey)}</Button>
                         </div>
                     </>
                 )}
             </Card>
+            </div>
 
             {/* Entity List */}
             <Card padding="sm">
@@ -352,6 +403,7 @@ export default function LedgerPage({ type }: LedgerPageProps) {
                                 const entityDisplayName = entity[cfg.nameColumn];
                                 const isExpanded = expandedCode === entityCode;
                                 const balance = Number(entity.balance);
+                                const hasTxMatch = txMatchCodes.includes(entityCode);
                                 return (
                                     <React.Fragment key={entityCode}>
                                         <tr className={`transition-colors ${isExpanded ? 'bg-indigo-50/40 dark:bg-indigo-900/20' : 'hover:bg-slate-50/70 dark:hover:bg-slate-700/50'}`}>
@@ -364,6 +416,7 @@ export default function LedgerPage({ type }: LedgerPageProps) {
                                                     <span className="text-sm font-semibold text-indigo-600 dark:text-indigo-400 group-hover:text-indigo-800 dark:group-hover:text-indigo-300 transition-colors">
                                                         {entityCode}
                                                     </span>
+                                                    {hasTxMatch && <span className="w-2 h-2 rounded-full bg-yellow-400 animate-pulse" title={t('th_doc_number')} />}
                                                 </button>
                                             </td>
                                             <td className="px-4 py-3.5 text-sm font-medium text-slate-800 dark:text-slate-200">{entityDisplayName}</td>
@@ -377,24 +430,36 @@ export default function LedgerPage({ type }: LedgerPageProps) {
                                                 </span>
                                             </td>
                                             <td className="px-4 py-3.5">
-                                                <div className="flex items-center gap-1">
+                                                <div className="flex items-center gap-1.5">
+                                                    <button
+                                                        onClick={() => prefillEntry(entityCode)}
+                                                        className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 transition-colors"
+                                                        title={t('btn_update')}
+                                                    >
+                                                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                                            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m0-16l-4 4m4-4l4 4" />
+                                                        </svg>
+                                                        {t('btn_update')}
+                                                    </button>
                                                     <button
                                                         onClick={() => openEdit(entity)}
-                                                        className="p-1.5 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 transition-colors"
+                                                        className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 transition-colors"
                                                         title={t('btn_edit')}
                                                     >
-                                                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                                             <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                                                         </svg>
+                                                        {t('btn_edit')}
                                                     </button>
                                                     <button
                                                         onClick={() => setDeleteTarget({ code: entityCode, name: entityDisplayName })}
-                                                        className="p-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                                                        className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
                                                         title={t('btn_delete')}
                                                     >
-                                                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                                             <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                                                         </svg>
+                                                        {t('btn_delete')}
                                                     </button>
                                                 </div>
                                             </td>
@@ -417,6 +482,7 @@ export default function LedgerPage({ type }: LedgerPageProps) {
                                                                         <TxSortHeader col="transaction_date">{t('th_trans_date')}</TxSortHeader>
                                                                         <TxSortHeader col="logged_at">{t('th_logged_at')}</TxSortHeader>
                                                                         <TxSortHeader col="transaction_type">{t('th_type')}</TxSortHeader>
+                                                                        <TxSortHeader col="document_number">{t('th_doc_number')}</TxSortHeader>
                                                                         <TxSortHeader col="debit">{t('th_debit')}</TxSortHeader>
                                                                         <TxSortHeader col="credit">{t('th_credit')}</TxSortHeader>
                                                                         <TxSortHeader col="new_balance">{t('th_balance')}</TxSortHeader>
@@ -430,6 +496,13 @@ export default function LedgerPage({ type }: LedgerPageProps) {
                                                                             <td className="px-3 py-2.5 text-xs text-slate-600 dark:text-slate-400 whitespace-nowrap">{fmtDate(tx.transaction_date)}</td>
                                                                             <td className="px-3 py-2.5 text-xs text-slate-400 dark:text-slate-500 whitespace-nowrap">{fmtDateTime(tx.logged_at)}</td>
                                                                             <td className="px-3 py-2.5 text-xs"><Badge>{tx.transaction_type}</Badge></td>
+                                                                            <td className="px-3 py-2.5 text-xs text-slate-500 dark:text-slate-400 whitespace-nowrap">
+                                                                                {tx.document_number ? (
+                                                                                    search && tx.document_number.toLowerCase().includes(search.toLowerCase())
+                                                                                        ? <span className="bg-yellow-200 dark:bg-yellow-700 px-1 rounded font-medium">{tx.document_number}</span>
+                                                                                        : tx.document_number
+                                                                                ) : '-'}
+                                                                            </td>
                                                                             <td className="px-3 py-2.5 text-xs text-emerald-600 font-medium tabular-nums">{fmtNum(tx.debit)}</td>
                                                                             <td className="px-3 py-2.5 text-xs text-red-500 font-medium tabular-nums">{fmtNum(tx.credit)}</td>
                                                                             <td className="px-3 py-2.5 text-xs font-bold dark:text-slate-100 tabular-nums">{fmtNum(tx.new_balance)}</td>
@@ -438,7 +511,7 @@ export default function LedgerPage({ type }: LedgerPageProps) {
                                                                         </tr>
                                                                     ))}
                                                                     {transactions.length === 0 && (
-                                                                        <tr><td colSpan={8} className="px-3 py-8 text-center text-xs text-slate-400 dark:text-slate-500">{t('no_transactions')}</td></tr>
+                                                                        <tr><td colSpan={9} className="px-3 py-8 text-center text-xs text-slate-400 dark:text-slate-500">{t('no_transactions')}</td></tr>
                                                                     )}
                                                                 </tbody>
                                                             </table>
@@ -538,11 +611,10 @@ export default function LedgerPage({ type }: LedgerPageProps) {
                                     onChange={(e) => setEditFields(f => ({ ...f, email: e.target.value }))}
                                 />
                             )}
-                            <Input
+                            <DatePickerInput
                                 label={t('registration_date')}
-                                type="date"
                                 value={editFields.registration_date ?? ''}
-                                onChange={(e) => setEditFields(f => ({ ...f, registration_date: e.target.value }))}
+                                onChange={(v) => setEditFields(f => ({ ...f, registration_date: v }))}
                             />
                             <Input
                                 label={t('document_number')}

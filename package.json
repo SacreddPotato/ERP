@@ -9,6 +9,7 @@
     "devDependencies": {
         "@tailwindcss/vite": "^4.0.0",
         "@types/react": "^19.2.14",
+        "@types/react-datepicker": "^6.2.0",
         "@types/react-dom": "^19.2.3",
         "axios": "^1.11.0",
         "concurrently": "^9.0.1",
@@ -24,6 +25,7 @@
         "@vitejs/plugin-react": "^5.1.4",
         "i18next": "^25.8.14",
         "react": "^19.2.4",
+        "react-datepicker": "^9.1.0",
         "react-dom": "^19.2.4",
         "react-i18next": "^16.5.6"
     }

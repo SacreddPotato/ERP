@@ -17,7 +17,25 @@ class LedgerController extends Controller
         $ledgerType = LedgerType::from($type);
         $entities = $this->service->getAll($ledgerType, $request->only(['search', 'payment_method', 'document_number', 'statement']));
         $totals = $this->service->getTotalBalance($ledgerType);
-        return response()->json(['entities' => $entities, 'totals' => $totals]);
+
+        $txMatchCodes = [];
+        if ($request->filled('search')) {
+            $txMatchCodes = $this->service->getEntityCodesWithMatchingTransactions($ledgerType, $request->input('search'));
+
+            // Include entities that have matching transactions but weren't found by entity search
+            if (!empty($txMatchCodes)) {
+                $column = $ledgerType->codeColumn();
+                $existingCodes = $entities->pluck($column)->toArray();
+                $missingCodes = array_diff($txMatchCodes, $existingCodes);
+                if (!empty($missingCodes)) {
+                    $model = $ledgerType->modelClass();
+                    $additional = $model::whereIn($column, $missingCodes)->orderBy($column)->get();
+                    $entities = $entities->merge($additional)->sortBy($column)->values();
+                }
+            }
+        }
+
+        return response()->json(['entities' => $entities, 'totals' => $totals, 'tx_match_codes' => $txMatchCodes]);
     }
 
     public function generateCode(string $type): JsonResponse

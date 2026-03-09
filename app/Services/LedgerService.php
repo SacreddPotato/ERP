@@ -216,13 +216,48 @@ class LedgerService
             $txType = $log->transaction_type instanceof LedgerTransactionType ? $log->transaction_type : LedgerTransactionType::from($log->transaction_type);
 
             if ($txType === LedgerTransactionType::Delete) {
+                // Reverse deletion → restore entity from backup
                 if (preg_match('/\[DELETED_ENTITY:(.+?)\]/', $log->statement, $matches)) {
                     $backup = json_decode($matches[1], true);
                     if ($backup) {
                         $model::create($backup);
                     }
                 }
+            } elseif ($txType === LedgerTransactionType::New) {
+                // Reverse creation → delete the entity entirely
+                $entity = $model::where($column, $log->entity_code)->first();
+                if ($entity) {
+                    $backup = $entity->toArray();
+                    unset($backup['id'], $backup['created_at'], $backup['updated_at']);
+                    $entity->delete();
+                    // Store backup in statement so it can be un-reversed if needed
+                    $log->update([
+                        'statement' => ($log->statement ? $log->statement . ' ' : '') . '[REVERSED] [DELETED_ENTITY:' . json_encode($backup) . ']',
+                    ]);
+                    return true;
+                }
+            } elseif ($txType === LedgerTransactionType::Edit) {
+                // Reverse edit → replay old values from the change log in statement
+                // Format: "field: old → new, field2: old2 → new2"
+                $entity = $model::where($column, $log->entity_code)->first();
+                if ($entity && $log->statement) {
+                    $changes = explode(', ', $log->statement);
+                    foreach ($changes as $change) {
+                        if (preg_match('/^(\w+):\s*(.+?)\s*→\s*(.+)$/', trim($change), $m)) {
+                            $field = $m[1];
+                            $oldValue = $m[2];
+                            if ($entity->isFillable($field)) {
+                                $entity->{$field} = $oldValue;
+                            }
+                        }
+                    }
+                    if (method_exists($entity, 'recalculateBalance')) {
+                        $entity->recalculateBalance();
+                    }
+                    $entity->save();
+                }
             } else {
+                // Reverse update → subtract debit/credit
                 $entity = $model::where($column, $log->entity_code)->first();
                 if ($entity) {
                     $entity->debit = max(0, $entity->debit - (float) $log->debit);
@@ -291,6 +326,23 @@ class LedgerService
                 ['logged_at', 'desc'],
             ])
             ->values();
+    }
+
+    public function getEntityCodesWithMatchingTransactions(LedgerType $type, string $search): array
+    {
+        $logCodes = LedgerLog::where('ledger_type', $type->value)
+            ->where('document_number', 'like', "%{$search}%")
+            ->distinct()
+            ->pluck('entity_code')
+            ->toArray();
+
+        $txnCodes = LedgerTransaction::where('ledger_type', $type->value)
+            ->where('document_number', 'like', "%{$search}%")
+            ->distinct()
+            ->pluck('entity_code')
+            ->toArray();
+
+        return array_values(array_unique(array_merge($logCodes, $txnCodes)));
     }
 
     protected function getNameColumn(LedgerType $type): string

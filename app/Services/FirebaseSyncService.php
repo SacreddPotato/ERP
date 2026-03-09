@@ -18,18 +18,20 @@ use App\Models\TreasuryConfig;
 use Google\Auth\Credentials\ServiceAccountCredentials;
 use GuzzleHttp\Client;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 class FirebaseSyncService
 {
     protected Client $http;
     protected string $baseUrl;
     protected string $accessToken;
+    protected string $projectId;
     protected const BATCH_SIZE = 500;
 
     public function __construct()
     {
         $credentialsPath = config('firebase.credentials');
-        $projectId = config('firebase.project_id');
+        $this->projectId = config('firebase.project_id');
 
         if (!$credentialsPath || !file_exists($credentialsPath)) {
             throw new \RuntimeException('Firebase credentials file not found: ' . ($credentialsPath ?: '(not configured)'));
@@ -47,8 +49,8 @@ class FirebaseSyncService
         $token = $creds->fetchAuthToken();
         $this->accessToken = $token['access_token'];
 
-        $this->baseUrl = "https://firestore.googleapis.com/v1/projects/{$projectId}/databases/(default)/documents";
-        $this->http = new Client(['timeout' => 60]);
+        $this->baseUrl = "https://firestore.googleapis.com/v1/projects/{$this->projectId}/databases/(default)/documents";
+        $this->http = new Client(['timeout' => 120]);
     }
 
     protected function headers(): array
@@ -57,6 +59,23 @@ class FirebaseSyncService
             'Authorization' => "Bearer {$this->accessToken}",
             'Content-Type' => 'application/json',
         ];
+    }
+
+    // ─── Persistent sync timestamps (survives cache clears / app restarts) ──
+
+    protected function getSyncTimestamp(string $key): ?string
+    {
+        return DB::table('sync_meta')->where('key', $key)->value('value');
+    }
+
+    protected function setSyncTimestamp(string $key, string $value): void
+    {
+        DB::table('sync_meta')->updateOrInsert(['key' => $key], ['value' => $value]);
+    }
+
+    protected function clearSyncTimestamps(): void
+    {
+        DB::table('sync_meta')->truncate();
     }
 
     // ─── Firestore collection name mapping ─────────────────────────
@@ -72,6 +91,10 @@ class FirebaseSyncService
 
     // ─── Firestore REST helpers ──────────────────────────────────────
 
+    /**
+     * List all documents in a collection (paginated).
+     * Each document returned counts as 1 Firestore read.
+     */
     protected function getAllDocuments(string $collectionPath): array
     {
         $documents = [];
@@ -97,6 +120,68 @@ class FirebaseSyncService
         } while ($pageToken);
 
         return $documents;
+    }
+
+    /**
+     * Query documents modified since a given timestamp using runQuery.
+     * Only returns documents with _lastUpdated > $since.
+     * Each result document counts as 1 Firestore read (min 1 if empty).
+     */
+    protected function getDocumentsSince(string $collectionPath, string $since): array
+    {
+        // Parse "stock/bahbit/items" → parent="stock/bahbit", collectionId="items"
+        $parts = explode('/', $collectionPath);
+        $collectionId = array_pop($parts);
+        $parentPath = implode('/', $parts);
+
+        $url = $this->baseUrl;
+        if ($parentPath) {
+            $url .= "/{$parentPath}";
+        }
+        $url .= ':runQuery';
+
+        $body = [
+            'structuredQuery' => [
+                'from' => [['collectionId' => $collectionId]],
+                'where' => [
+                    'fieldFilter' => [
+                        'field' => ['fieldPath' => '_lastUpdated'],
+                        'op' => 'GREATER_THAN',
+                        'value' => ['stringValue' => $since],
+                    ],
+                ],
+            ],
+        ];
+
+        $response = $this->http->post($url, [
+            'headers' => $this->headers(),
+            'json' => $body,
+        ]);
+
+        $documents = [];
+        $results = json_decode($response->getBody(), true);
+        foreach ($results as $result) {
+            if (isset($result['document'])) {
+                $doc = $result['document'];
+                $docId = basename($doc['name']);
+                $documents[$docId] = $this->decodeFields($doc['fields'] ?? []);
+            }
+        }
+
+        return $documents;
+    }
+
+    /**
+     * Get documents — uses delta query if $since is available.
+     * Only falls back to full read if $since is null (first-ever sync).
+     * Delta query errors are NOT silently swallowed — they propagate.
+     */
+    protected function getDocuments(string $collectionPath, ?string $since = null): array
+    {
+        if ($since) {
+            return $this->getDocumentsSince($collectionPath, $since);
+        }
+        return $this->getAllDocuments($collectionPath);
     }
 
     protected function getDocument(string $documentPath): ?array
@@ -125,8 +210,9 @@ class FirebaseSyncService
 
     protected function batchWrite(array $writes): void
     {
-        $projectId = config('firebase.project_id');
-        $url = "https://firestore.googleapis.com/v1/projects/{$projectId}/databases/(default)/documents:batchWrite";
+        if (empty($writes)) return;
+
+        $url = "https://firestore.googleapis.com/v1/projects/{$this->projectId}/databases/(default)/documents:batchWrite";
 
         foreach (array_chunk($writes, self::BATCH_SIZE) as $chunk) {
             $this->http->post($url, [
@@ -135,6 +221,8 @@ class FirebaseSyncService
             ]);
         }
     }
+
+    // ─── Data encoding/decoding ────────────────────────────────────
 
     protected function decodeFields(array $fields): array
     {
@@ -188,28 +276,103 @@ class FirebaseSyncService
         return ['stringValue' => (string) $value];
     }
 
+    // ─── Data sanitization ─────────────────────────────────────────
+
+    protected function sanitizeForModel(string $modelClass, array $data): array
+    {
+        // Remove meta fields from Firestore
+        unset($data['id'], $data['lastUpdated'], $data['syncedAt'], $data['_lastUpdated']);
+        unset($data['created_at'], $data['updated_at']);
+
+        // Sanitize payment method (case-insensitive matching)
+        if (array_key_exists('payment_method', $data)) {
+            $data['payment_method'] = $this->sanitizePaymentMethod($data['payment_method']);
+        }
+
+        // Sanitize date fields
+        foreach (['registration_date', 'transaction_date', 'initialization_date', 'fiscal_year_start'] as $dateField) {
+            if (isset($data[$dateField]) && $data[$dateField] !== '') {
+                try {
+                    \Carbon\Carbon::parse($data[$dateField]);
+                } catch (\Throwable) {
+                    $data[$dateField] = null;
+                }
+            } elseif (isset($data[$dateField]) && $data[$dateField] === '') {
+                $data[$dateField] = null;
+            }
+        }
+
+        // Sanitize datetime fields
+        foreach (['logged_at', 'last_updated'] as $dtField) {
+            if (isset($data[$dtField]) && $data[$dtField] !== '') {
+                try {
+                    \Carbon\Carbon::parse($data[$dtField]);
+                } catch (\Throwable) {
+                    $data[$dtField] = null;
+                }
+            }
+        }
+
+        // Ensure numeric fields are actually numeric
+        foreach (['opening_balance', 'debit', 'credit', 'balance', 'previous_balance', 'new_balance',
+                   'starting_balance', 'total_incoming', 'total_outgoing', 'net_stock',
+                   'unit_price', 'min_stock', 'quantity', 'previous_stock', 'new_stock',
+                   'price', 'starting_capital'] as $numField) {
+            if (isset($data[$numField]) && !is_numeric($data[$numField])) {
+                $cleaned = preg_replace('/[^\d.\-]/', '', (string) $data[$numField]);
+                $data[$numField] = $cleaned !== '' ? (float) $cleaned : 0;
+            }
+        }
+
+        // Strip to fillable fields only
+        $model = new $modelClass;
+        $fillable = $model->getFillable();
+        return array_intersect_key($data, array_flip($fillable));
+    }
+
+    protected function sanitizePaymentMethod(mixed $value): ?string
+    {
+        if (!$value || $value === '') return null;
+        $lower = strtolower(trim((string) $value));
+        $map = [
+            'cash' => 'cash',
+            'bank_transfer' => 'bank_transfer',
+            'banktransfer' => 'bank_transfer',
+            'bank transfer' => 'bank_transfer',
+            'digital_wallet' => 'digital_wallet',
+            'digitalwallet' => 'digital_wallet',
+            'digital wallet' => 'digital_wallet',
+            'check' => 'check',
+            'cheque' => 'check',
+        ];
+        return $map[$lower] ?? null;
+    }
+
     // ─── PUSH ───────────────────────────────────────────────────────
 
     public function pushAll(?callable $onProgress = null): array
     {
         $stats = ['pushed' => 0, 'errors' => []];
+        $lastPush = $this->getSyncTimestamp('last_push_at');
+        $now = now()->toIso8601String();
+
         $steps = ['stock', 'customers', 'suppliers', 'treasury', 'treasury_config', 'covenants', 'advances', 'stock_transactions', 'ledger_transactions', 'full_log', 'ledger_log'];
         $total = count($steps);
 
         foreach ($steps as $i => $step) {
             try {
                 match ($step) {
-                    'stock' => $stats['pushed'] += $this->pushStock(),
-                    'customers' => $stats['pushed'] += $this->pushLedgerEntities(LedgerType::Customer),
-                    'suppliers' => $stats['pushed'] += $this->pushLedgerEntities(LedgerType::Supplier),
-                    'treasury' => $stats['pushed'] += $this->pushLedgerEntities(LedgerType::Treasury),
-                    'treasury_config' => $stats['pushed'] += $this->pushTreasuryConfig(),
-                    'covenants' => $stats['pushed'] += $this->pushLedgerEntities(LedgerType::Covenant),
-                    'advances' => $stats['pushed'] += $this->pushLedgerEntities(LedgerType::Advance),
-                    'stock_transactions' => $stats['pushed'] += $this->pushStockTransactions(),
-                    'ledger_transactions' => $stats['pushed'] += $this->pushLedgerTransactions(),
-                    'full_log' => $stats['pushed'] += $this->pushTransactionLogs(),
-                    'ledger_log' => $stats['pushed'] += $this->pushLedgerLogs(),
+                    'stock' => $stats['pushed'] += $this->pushStock($lastPush, $now),
+                    'customers' => $stats['pushed'] += $this->pushLedgerEntities(LedgerType::Customer, $lastPush, $now),
+                    'suppliers' => $stats['pushed'] += $this->pushLedgerEntities(LedgerType::Supplier, $lastPush, $now),
+                    'treasury' => $stats['pushed'] += $this->pushLedgerEntities(LedgerType::Treasury, $lastPush, $now),
+                    'treasury_config' => $stats['pushed'] += $this->pushTreasuryConfig($now),
+                    'covenants' => $stats['pushed'] += $this->pushLedgerEntities(LedgerType::Covenant, $lastPush, $now),
+                    'advances' => $stats['pushed'] += $this->pushLedgerEntities(LedgerType::Advance, $lastPush, $now),
+                    'stock_transactions' => $stats['pushed'] += $this->pushStockTransactions($lastPush, $now),
+                    'ledger_transactions' => $stats['pushed'] += $this->pushLedgerTransactions($lastPush, $now),
+                    'full_log' => $stats['pushed'] += $this->pushTransactionLogs($lastPush, $now),
+                    'ledger_log' => $stats['pushed'] += $this->pushLedgerLogs($lastPush, $now),
                 };
             } catch (\Throwable $e) {
                 $stats['errors'][] = "{$step}: {$e->getMessage()}";
@@ -220,22 +383,30 @@ class FirebaseSyncService
             }
         }
 
+        $this->setSyncTimestamp('last_push_at', $now);
+
         return $stats;
     }
 
-    protected function pushStock(): int
+    protected function pushStock(?string $since, string $now): int
     {
         $writes = [];
-        $projectId = config('firebase.project_id');
 
         foreach (Factory::cases() as $factory) {
-            $items = StockItem::forFactory($factory->value)->get();
+            $query = StockItem::forFactory($factory->value);
+            if ($since) {
+                $query->where('updated_at', '>', $since);
+            }
+            $items = $query->get();
+
             foreach ($items as $item) {
-                $docPath = "projects/{$projectId}/databases/(default)/documents/stock/{$factory->value}/items/{$item->item_code}";
+                $docPath = "projects/{$this->projectId}/databases/(default)/documents/stock/{$factory->value}/items/{$item->item_code}";
+                $data = $this->stockItemToFirestore($item);
+                $data['_lastUpdated'] = $now;
                 $writes[] = [
                     'update' => [
                         'name' => $docPath,
-                        'fields' => $this->encodeFields($this->stockItemToFirestore($item)),
+                        'fields' => $this->encodeFields($data),
                     ],
                 ];
             }
@@ -245,23 +416,29 @@ class FirebaseSyncService
         return count($writes);
     }
 
-    protected function pushLedgerEntities(LedgerType $type): int
+    protected function pushLedgerEntities(LedgerType $type, ?string $since, string $now): int
     {
         $model = $type->modelClass();
         $column = $type->codeColumn();
-        $entities = $model::all();
+        $query = $model::query();
+        if ($since) {
+            $query->where('updated_at', '>', $since);
+        }
+        $entities = $query->get();
+
         $writes = [];
-        $projectId = config('firebase.project_id');
         $fsName = $this->firestoreLedgerName($type);
 
         foreach ($entities as $entity) {
-            $docPath = "projects/{$projectId}/databases/(default)/documents/ledgers/{$fsName}/entries/{$entity->{$column}}";
+            $docPath = "projects/{$this->projectId}/databases/(default)/documents/ledgers/{$fsName}/entries/{$entity->{$column}}";
             $data = $entity->toArray();
+            unset($data['id'], $data['created_at'], $data['updated_at']);
             foreach ($data as $key => $value) {
                 if ($value instanceof \DateTimeInterface) {
                     $data[$key] = $value->toIso8601String();
                 }
             }
+            $data['_lastUpdated'] = $now;
             $writes[] = [
                 'update' => [
                     'name' => $docPath,
@@ -274,78 +451,101 @@ class FirebaseSyncService
         return count($writes);
     }
 
-    protected function pushTreasuryConfig(): int
+    protected function pushTreasuryConfig(string $now): int
     {
         $config = TreasuryConfig::current();
         if (!$config) return 0;
 
         $data = $config->toArray();
+        unset($data['id'], $data['created_at'], $data['updated_at']);
         foreach ($data as $key => $value) {
             if ($value instanceof \DateTimeInterface) {
                 $data[$key] = $value->toIso8601String();
             }
         }
+        $data['_lastUpdated'] = $now;
         $this->setDocument('settings/treasury_config', $data);
         return 1;
     }
 
-    protected function pushStockTransactions(): int
+    protected function pushStockTransactions(?string $since, string $now): int
     {
+        $query = StockTransaction::query();
+        if ($since) {
+            $query->where('updated_at', '>', $since);
+        }
         return $this->pushTransactionCollection(
-            StockTransaction::all(),
+            $query->get(),
             'stock_transactions',
-            fn($t) => $t->logged_at->format('Y-m-d_H-i-s') . "_{$t->item_code}_{$t->factory}"
+            fn($t) => $t->logged_at->format('Y-m-d_H-i-s') . "_{$t->item_code}_{$t->factory}",
+            $now
         );
     }
 
-    protected function pushLedgerTransactions(): int
+    protected function pushLedgerTransactions(?string $since, string $now): int
     {
         $count = 0;
         foreach (LedgerType::cases() as $type) {
-            $transactions = LedgerTransaction::where('ledger_type', $type->value)->get();
+            $query = LedgerTransaction::where('ledger_type', $type->value);
+            if ($since) {
+                $query->where('updated_at', '>', $since);
+            }
+            $transactions = $query->get();
             $collectionName = "{$type->value}_transactions";
 
             $count += $this->pushTransactionCollection(
                 $transactions,
                 $collectionName,
-                fn($t) => $t->logged_at->format('Y-m-d_H-i-s') . "_{$t->entity_code}"
+                fn($t) => $t->logged_at->format('Y-m-d_H-i-s') . "_{$t->entity_code}",
+                $now
             );
         }
         return $count;
     }
 
-    protected function pushTransactionLogs(): int
+    protected function pushTransactionLogs(?string $since, string $now): int
     {
+        $query = TransactionLog::query();
+        if ($since) {
+            $query->where('updated_at', '>', $since);
+        }
         return $this->pushTransactionCollection(
-            TransactionLog::all(),
+            $query->get(),
             'full_transactions_log',
-            fn($t) => $t->logged_at->format('Y-m-d_H-i-s') . "_{$t->item_code}"
+            fn($t) => $t->logged_at->format('Y-m-d_H-i-s') . "_{$t->item_code}",
+            $now
         );
     }
 
-    protected function pushLedgerLogs(): int
+    protected function pushLedgerLogs(?string $since, string $now): int
     {
+        $query = LedgerLog::query();
+        if ($since) {
+            $query->where('updated_at', '>', $since);
+        }
         return $this->pushTransactionCollection(
-            LedgerLog::all(),
+            $query->get(),
             'ledger_log',
-            fn($t) => $t->logged_at->format('Y-m-d_H-i-s') . "_{$t->entity_code}"
+            fn($t) => $t->logged_at->format('Y-m-d_H-i-s') . "_{$t->entity_code}",
+            $now
         );
     }
 
-    protected function pushTransactionCollection($records, string $collectionName, callable $docIdFn): int
+    protected function pushTransactionCollection($records, string $collectionName, callable $docIdFn, string $now): int
     {
         $writes = [];
-        $projectId = config('firebase.project_id');
 
         foreach ($records as $record) {
             $docId = $docIdFn($record);
-            $docPath = "projects/{$projectId}/databases/(default)/documents/{$collectionName}/{$docId}";
+            $docPath = "projects/{$this->projectId}/databases/(default)/documents/{$collectionName}/{$docId}";
             $data = $record->toArray();
+            unset($data['id'], $data['created_at'], $data['updated_at']);
             foreach ($data as $key => $value) {
                 if ($value instanceof \DateTimeInterface) {
                     $data[$key] = $value->toIso8601String();
                 }
             }
+            $data['_lastUpdated'] = $now;
             $writes[] = [
                 'update' => [
                     'name' => $docPath,
@@ -363,26 +563,32 @@ class FirebaseSyncService
     public function pullAll(bool $skipExisting = true, ?callable $onProgress = null): array
     {
         $stats = ['pulled' => 0, 'skipped' => 0, 'errors' => []];
+        $lastPull = $this->getSyncTimestamp('last_pull_at');
+        $now = now()->toIso8601String();
+
         $steps = ['stock', 'customers', 'suppliers', 'treasury', 'treasury_config', 'covenants', 'advances', 'stock_transactions', 'ledger_transactions', 'full_log', 'ledger_log'];
         $total = count($steps);
 
         foreach ($steps as $i => $step) {
             try {
                 $result = match ($step) {
-                    'stock' => $this->pullStock($skipExisting),
-                    'customers' => $this->pullLedgerEntities(LedgerType::Customer, $skipExisting),
-                    'suppliers' => $this->pullLedgerEntities(LedgerType::Supplier, $skipExisting),
-                    'treasury' => $this->pullLedgerEntities(LedgerType::Treasury, $skipExisting),
+                    'stock' => $this->pullStock($skipExisting, $lastPull),
+                    'customers' => $this->pullLedgerEntities(LedgerType::Customer, $skipExisting, $lastPull),
+                    'suppliers' => $this->pullLedgerEntities(LedgerType::Supplier, $skipExisting, $lastPull),
+                    'treasury' => $this->pullLedgerEntities(LedgerType::Treasury, $skipExisting, $lastPull),
                     'treasury_config' => $this->pullTreasuryConfig($skipExisting),
-                    'covenants' => $this->pullLedgerEntities(LedgerType::Covenant, $skipExisting),
-                    'advances' => $this->pullLedgerEntities(LedgerType::Advance, $skipExisting),
-                    'stock_transactions' => $this->pullStockTransactions($skipExisting),
-                    'ledger_transactions' => $this->pullLedgerTransactions($skipExisting),
-                    'full_log' => $this->pullTransactionLogs($skipExisting),
-                    'ledger_log' => $this->pullLedgerLogs($skipExisting),
+                    'covenants' => $this->pullLedgerEntities(LedgerType::Covenant, $skipExisting, $lastPull),
+                    'advances' => $this->pullLedgerEntities(LedgerType::Advance, $skipExisting, $lastPull),
+                    'stock_transactions' => $this->pullStockTransactions($skipExisting, $lastPull),
+                    'ledger_transactions' => $this->pullLedgerTransactions($skipExisting, $lastPull),
+                    'full_log' => $this->pullTransactionLogs($skipExisting, $lastPull),
+                    'ledger_log' => $this->pullLedgerLogs($skipExisting, $lastPull),
                 };
                 $stats['pulled'] += $result['pulled'];
                 $stats['skipped'] += $result['skipped'];
+                if (!empty($result['errors'])) {
+                    $stats['errors'] = array_merge($stats['errors'], $result['errors']);
+                }
             } catch (\Throwable $e) {
                 $stats['errors'][] = "{$step}: {$e->getMessage()}";
             }
@@ -406,11 +612,16 @@ class FirebaseSyncService
             }
         }
 
+        $this->setSyncTimestamp('last_pull_at', $now);
+
         return $stats;
     }
 
     public function forcePull(?callable $onProgress = null): array
     {
+        // Clear sync timestamps so we do a full pull
+        $this->clearSyncTimestamps();
+
         DB::transaction(function () {
             StockItem::truncate();
             TransactionLog::truncate();
@@ -428,198 +639,272 @@ class FirebaseSyncService
         return $this->pullAll(false, $onProgress);
     }
 
-    protected function pullStock(bool $skipExisting): array
+    /**
+     * OPTIMIZED: Pre-load all existing local codes per factory in one query,
+     * then skip matching Firestore docs without individual DB lookups.
+     */
+    protected function pullStock(bool $skipExisting, ?string $since): array
     {
         $pulled = 0;
         $skipped = 0;
+        $errors = [];
 
         foreach (Factory::cases() as $factory) {
             try {
-                $docs = $this->getAllDocuments("stock/{$factory->value}/items");
-            } catch (\Throwable) {
+                $docs = $this->getDocuments("stock/{$factory->value}/items", $since);
+            } catch (\Throwable $e) {
+                $errors[] = "stock/{$factory->value}: {$e->getMessage()}";
                 continue;
             }
 
-            foreach ($docs as $docId => $data) {
+            if (empty($docs)) continue;
+
+            // Pre-load all existing item codes for this factory in ONE query
+            $existingCodes = StockItem::where('factory', $factory->value)
+                ->pluck('item_code')
+                ->flip()
+                ->all();
+
+            foreach ($docs as $docId => $rawData) {
+                $rawData['factory'] = $factory->value;
+                $rawData['item_code'] = $rawData['id'] ?? $docId;
+
+                $data = $this->sanitizeForModel(StockItem::class, $rawData);
+                if (empty($data['item_code'])) {
+                    $data['item_code'] = $docId;
+                }
                 $data['factory'] = $factory->value;
-                $data['item_code'] = $data['id'] ?? $docId;
-                unset($data['id'], $data['lastUpdated'], $data['syncedAt']);
 
-                $existing = StockItem::where('item_code', $data['item_code'])
-                    ->where('factory', $factory->value)->first();
+                $exists = isset($existingCodes[$data['item_code']]);
 
-                if ($existing && $skipExisting) {
+                if ($exists && $skipExisting) {
                     $skipped++;
                     continue;
                 }
 
-                if ($existing) {
-                    $existing->update($data);
-                } else {
-                    StockItem::create($data);
+                try {
+                    if ($exists) {
+                        StockItem::where('item_code', $data['item_code'])
+                            ->where('factory', $factory->value)
+                            ->update($data);
+                    } else {
+                        StockItem::create($data);
+                        $existingCodes[$data['item_code']] = true;
+                    }
+                    $pulled++;
+                } catch (\Throwable $e) {
+                    $errors[] = "stock/{$factory->value}/{$docId}: {$e->getMessage()}";
+                    $skipped++;
                 }
-                $pulled++;
             }
         }
 
-        return compact('pulled', 'skipped');
+        return compact('pulled', 'skipped', 'errors');
     }
 
-    protected function pullLedgerEntities(LedgerType $type, bool $skipExisting): array
+    /**
+     * OPTIMIZED: Pre-load all existing entity codes in one query,
+     * then skip matching Firestore docs without individual DB lookups.
+     */
+    protected function pullLedgerEntities(LedgerType $type, bool $skipExisting, ?string $since): array
     {
         $model = $type->modelClass();
         $column = $type->codeColumn();
         $pulled = 0;
         $skipped = 0;
+        $errors = [];
         $fsName = $this->firestoreLedgerName($type);
 
         try {
-            $docs = $this->getAllDocuments("ledgers/{$fsName}/entries");
-        } catch (\Throwable) {
-            return compact('pulled', 'skipped');
+            $docs = $this->getDocuments("ledgers/{$fsName}/entries", $since);
+        } catch (\Throwable $e) {
+            $errors[] = "{$type->value}: {$e->getMessage()}";
+            return compact('pulled', 'skipped', 'errors');
         }
 
-        foreach ($docs as $docId => $data) {
-            $code = $data[$column] ?? $data['id'] ?? $docId;
+        if (empty($docs)) {
+            return compact('pulled', 'skipped', 'errors');
+        }
+
+        // Pre-load all existing entity codes in ONE query
+        $existingCodes = $model::pluck($column)->flip()->all();
+
+        foreach ($docs as $docId => $rawData) {
+            $code = $rawData[$column] ?? $rawData['id'] ?? $docId;
+            $rawData[$column] = $code;
+
+            $data = $this->sanitizeForModel($model, $rawData);
             $data[$column] = $code;
-            unset($data['id'], $data['lastUpdated'], $data['syncedAt']);
 
-            // Clean empty enum values that would fail casting
-            if (isset($data['payment_method']) && $data['payment_method'] === '') {
-                $data['payment_method'] = null;
-            }
+            $exists = isset($existingCodes[$code]);
 
-            $existing = $model::where($column, $code)->first();
-            if ($existing && $skipExisting) {
+            if ($exists && $skipExisting) {
                 $skipped++;
                 continue;
             }
 
             try {
-                if ($existing) {
-                    $existing->update($data);
+                if ($exists) {
+                    $model::where($column, $code)->update($data);
                 } else {
                     $model::create($data);
+                    $existingCodes[$code] = true;
                 }
                 $pulled++;
-            } catch (\Throwable) {
+            } catch (\Throwable $e) {
+                $errors[] = "{$type->value}/{$docId}: {$e->getMessage()}";
                 $skipped++;
             }
         }
 
-        return compact('pulled', 'skipped');
+        return compact('pulled', 'skipped', 'errors');
     }
 
+    /**
+     * OPTIMIZED: Check local DB FIRST — skip Firestore read entirely if exists.
+     */
     protected function pullTreasuryConfig(bool $skipExisting): array
     {
-        $data = $this->getDocument('settings/treasury_config');
+        $errors = [];
+
+        // Check local DB FIRST to avoid unnecessary Firestore read
+        if ($skipExisting && TreasuryConfig::exists()) {
+            return ['pulled' => 0, 'skipped' => 1, 'errors' => $errors];
+        }
+
+        try {
+            $data = $this->getDocument('settings/treasury_config');
+        } catch (\Throwable $e) {
+            $errors[] = "treasury_config: {$e->getMessage()}";
+            return ['pulled' => 0, 'skipped' => 0, 'errors' => $errors];
+        }
 
         if (!$data) {
-            return ['pulled' => 0, 'skipped' => 0];
+            return ['pulled' => 0, 'skipped' => 0, 'errors' => $errors];
         }
 
-        unset($data['lastUpdated'], $data['syncedAt']);
+        $data = $this->sanitizeForModel(TreasuryConfig::class, $data);
         $existing = TreasuryConfig::first();
 
-        if ($existing && $skipExisting) {
-            return ['pulled' => 0, 'skipped' => 1];
+        try {
+            if ($existing) {
+                $existing->update($data);
+            } else {
+                TreasuryConfig::create($data);
+            }
+        } catch (\Throwable $e) {
+            $errors[] = "treasury_config: {$e->getMessage()}";
+            return ['pulled' => 0, 'skipped' => 1, 'errors' => $errors];
         }
 
-        if ($existing) {
-            $existing->update($data);
-        } else {
-            TreasuryConfig::create($data);
-        }
-
-        return ['pulled' => 1, 'skipped' => 0];
+        return ['pulled' => 1, 'skipped' => 0, 'errors' => $errors];
     }
 
-    protected function pullStockTransactions(bool $skipExisting): array
+    protected function pullStockTransactions(bool $skipExisting, ?string $since): array
     {
         return $this->pullTransactionCollection(
             'stock_transactions',
             StockTransaction::class,
             ['logged_at', 'item_code'],
-            $skipExisting
+            $skipExisting,
+            $since
         );
     }
 
-    protected function pullLedgerTransactions(bool $skipExisting): array
+    protected function pullLedgerTransactions(bool $skipExisting, ?string $since): array
     {
         $pulled = 0;
         $skipped = 0;
+        $errors = [];
 
         foreach (LedgerType::cases() as $type) {
             $result = $this->pullTransactionCollection(
                 "{$type->value}_transactions",
                 LedgerTransaction::class,
                 ['logged_at', 'entity_code'],
-                $skipExisting
+                $skipExisting,
+                $since
             );
             $pulled += $result['pulled'];
             $skipped += $result['skipped'];
+            if (!empty($result['errors'])) {
+                $errors = array_merge($errors, $result['errors']);
+            }
         }
 
-        return compact('pulled', 'skipped');
+        return compact('pulled', 'skipped', 'errors');
     }
 
-    protected function pullTransactionLogs(bool $skipExisting): array
+    protected function pullTransactionLogs(bool $skipExisting, ?string $since): array
     {
         return $this->pullTransactionCollection(
             'full_transactions_log',
             TransactionLog::class,
             ['logged_at', 'item_code'],
-            $skipExisting
+            $skipExisting,
+            $since
         );
     }
 
-    protected function pullLedgerLogs(bool $skipExisting): array
+    protected function pullLedgerLogs(bool $skipExisting, ?string $since): array
     {
         return $this->pullTransactionCollection(
             'ledger_log',
             LedgerLog::class,
             ['logged_at', 'entity_code'],
-            $skipExisting
+            $skipExisting,
+            $since
         );
     }
 
-    protected function pullTransactionCollection(string $collectionName, string $modelClass, array $dedupKeys, bool $skipExisting): array
+    /**
+     * OPTIMIZED: Pre-load all existing dedup keys in one query using
+     * a composite key set, then check membership in-memory instead of
+     * N individual exists() queries.
+     */
+    protected function pullTransactionCollection(string $collectionName, string $modelClass, array $dedupKeys, bool $skipExisting, ?string $since): array
     {
         $pulled = 0;
         $skipped = 0;
+        $errors = [];
 
         try {
-            $docs = $this->getAllDocuments($collectionName);
-        } catch (\Throwable) {
-            return compact('pulled', 'skipped');
+            $docs = $this->getDocuments($collectionName, $since);
+        } catch (\Throwable $e) {
+            $errors[] = "{$collectionName}: {$e->getMessage()}";
+            return compact('pulled', 'skipped', 'errors');
         }
 
-        foreach ($docs as $docId => $data) {
-            unset($data['id'], $data['lastUpdated'], $data['syncedAt']);
+        if (empty($docs)) {
+            return compact('pulled', 'skipped', 'errors');
+        }
 
+        // Pre-load existing dedup key combinations in ONE query
+        $existingKeys = [];
+        if ($skipExisting && count($dedupKeys) >= 2) {
+            $rows = $modelClass::select($dedupKeys)->get();
+            foreach ($rows as $row) {
+                $compositeKey = implode('|', array_map(fn($k) => (string) $row->{$k}, $dedupKeys));
+                $existingKeys[$compositeKey] = true;
+            }
+        }
+
+        foreach ($docs as $docId => $rawData) {
             // Remap field names from Firestore to local DB columns
-            if (isset($data['entity_id']) && !isset($data['entity_code'])) {
-                $data['entity_code'] = $data['entity_id'];
-                unset($data['entity_id']);
+            if (isset($rawData['entity_id']) && !isset($rawData['entity_code'])) {
+                $rawData['entity_code'] = $rawData['entity_id'];
+                unset($rawData['entity_id']);
             }
-            if (isset($data['timestamp']) && !isset($data['logged_at'])) {
-                $data['logged_at'] = $data['timestamp'];
-                unset($data['timestamp']);
+            if (isset($rawData['timestamp']) && !isset($rawData['logged_at'])) {
+                $rawData['logged_at'] = $rawData['timestamp'];
+                unset($rawData['timestamp']);
             }
 
-            // Clean empty enum values
-            if (isset($data['payment_method']) && $data['payment_method'] === '') {
-                $data['payment_method'] = null;
-            }
+            $data = $this->sanitizeForModel($modelClass, $rawData);
 
             if ($skipExisting && count($dedupKeys) >= 2) {
-                $query = $modelClass::query();
-                foreach ($dedupKeys as $key) {
-                    if (isset($data[$key])) {
-                        $query->where($key, $data[$key]);
-                    }
-                }
-                if ($query->exists()) {
+                $compositeKey = implode('|', array_map(fn($k) => (string) ($data[$k] ?? ''), $dedupKeys));
+                if (isset($existingKeys[$compositeKey])) {
                     $skipped++;
                     continue;
                 }
@@ -628,12 +913,18 @@ class FirebaseSyncService
             try {
                 $modelClass::create($data);
                 $pulled++;
-            } catch (\Throwable) {
+                // Add to set so subsequent docs in same batch don't duplicate
+                if (count($dedupKeys) >= 2) {
+                    $compositeKey = implode('|', array_map(fn($k) => (string) ($data[$k] ?? ''), $dedupKeys));
+                    $existingKeys[$compositeKey] = true;
+                }
+            } catch (\Throwable $e) {
+                $errors[] = "{$collectionName}/{$docId}: {$e->getMessage()}";
                 $skipped++;
             }
         }
 
-        return compact('pulled', 'skipped');
+        return compact('pulled', 'skipped', 'errors');
     }
 
     // ─── HELPERS ────────────────────────────────────────────────────

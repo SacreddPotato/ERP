@@ -3,6 +3,7 @@ import { useApp } from '../../contexts/AppContext';
 import { Card, CardHeader } from '../ui/Card';
 import { Button } from '../ui/Button';
 import { Input, Select, Textarea } from '../ui/Input';
+import { DatePickerInput } from '../ui/DatePickerInput';
 import { Badge } from '../ui/Badge';
 import { toast } from '../ui/Toast';
 import api from '../../lib/api';
@@ -173,7 +174,7 @@ export default function StockManager() {
                         <Input label={t('starting_balance')} type="number" value={startingBalance} onChange={(e) => setStartingBalance(e.target.value)} placeholder={t('placeholder_starting_balance')} hint={t('hint_starting_balance')} />
                         <Input label={t('unit_price')} type="number" value={unitPrice} onChange={(e) => setUnitPrice(e.target.value)} placeholder={t('placeholder_price')} />
                         <Input label={t('min_stock')} type="number" value={minStock} onChange={(e) => setMinStock(e.target.value)} placeholder={t('placeholder_min_stock')} />
-                        <Input label={t('starting_balance_date')} type="date" value={balanceDate} onChange={(e) => setBalanceDate(e.target.value)} hint={t('hint_balance_date')} />
+                        <DatePickerInput label={t('starting_balance_date')} value={balanceDate} onChange={setBalanceDate} hint={t('hint_balance_date')} />
                     </div>
                     <div className="flex justify-end mt-6 pt-5 border-t border-slate-200 dark:border-slate-700">
                         <Button onClick={addItem} loading={loading} size="lg">{t('btn_add_item')}</Button>
@@ -199,7 +200,7 @@ export default function StockManager() {
                             ]}
                         />
                         <Input label={t('quantity')} type="number" value={quantity} onChange={(e) => setQuantity(e.target.value)} placeholder={t('placeholder_quantity')} />
-                        <Input label={t('transaction_date')} type="date" value={transactionDate} onChange={(e) => setTransactionDate(e.target.value)} hint={t('hint_transaction_date')} />
+                        <DatePickerInput label={t('transaction_date')} value={transactionDate} onChange={setTransactionDate} hint={t('hint_transaction_date')} />
 
                         {transactionType === '\u0648\u0627\u0631\u062f' && (
                             <>

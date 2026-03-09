@@ -29,13 +29,17 @@ export default function AppLayout({ children }: AppLayoutProps) {
     }, []);
 
     // Poll electron-updater status when downloading
+    const pollCountRef = useRef(0);
     const startPolling = useCallback((version: string, downloadUrl: string) => {
         stopPolling();
+        pollCountRef.current = 0;
         pollingRef.current = setInterval(async () => {
+            pollCountRef.current++;
             try {
                 const res = await api.get('/api/update-status');
                 const s = res.data as { status: string; version?: string; percent?: number; message?: string };
                 if (s.status === 'downloading') {
+                    pollCountRef.current = 0; // Reset counter when actively downloading
                     setUpdate({ phase: 'downloading', version, downloadUrl, percent: s.percent ?? 0 });
                 } else if (s.status === 'ready') {
                     stopPolling();
@@ -43,9 +47,13 @@ export default function AppLayout({ children }: AppLayoutProps) {
                 } else if (s.status === 'error') {
                     stopPolling();
                     setUpdate({ phase: 'error', message: s.message || 'Download failed', downloadUrl });
+                } else if (pollCountRef.current >= 15) {
+                    // Status stayed idle for 30s — updater not running (dev mode or unsupported)
+                    stopPolling();
+                    setUpdate({ phase: 'available', version, downloadUrl });
                 }
             } catch {
-                // Polling failed, keep trying
+                stopPolling();
             }
         }, 2000);
     }, [stopPolling]);

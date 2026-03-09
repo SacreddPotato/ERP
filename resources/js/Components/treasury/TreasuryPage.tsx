@@ -1,8 +1,9 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useApp } from '../../contexts/AppContext';
 import { Card, CardHeader } from '../ui/Card';
 import { Button } from '../ui/Button';
 import { Input, Select, Textarea } from '../ui/Input';
+import { DatePickerInput } from '../ui/DatePickerInput';
 import { StatCard } from '../ui/StatCard';
 import { Badge } from '../ui/Badge';
 import { Modal } from '../ui/Modal';
@@ -59,6 +60,12 @@ export default function TreasuryPage() {
     // Per-entity tx export modal
     const [txExport, setTxExport] = useState<{ code: string; name: string; entity: LedgerEntity; data: LedgerLog[] } | null>(null);
 
+    // Transaction document_number match codes (for auto-expand + highlight)
+    const [txMatchCodes, setTxMatchCodes] = useState<string[]>([]);
+
+    // Ref for scrolling to entry form
+    const entryFormRef = useRef<HTMLDivElement>(null);
+
     const fetchData = useCallback(async () => {
         setLoading(true);
         try {
@@ -69,6 +76,24 @@ export default function TreasuryPage() {
             setSummary(summaryRes.data);
             setEntities(ledgerRes.data.entities);
             setTotals(ledgerRes.data.totals);
+            const matchCodes: string[] = ledgerRes.data.tx_match_codes ?? [];
+            setTxMatchCodes(matchCodes);
+
+            // Auto-expand first entity with matching transaction document_numbers
+            if (matchCodes.length > 0) {
+                const firstMatch = matchCodes[0];
+                setTxLoading(true);
+                try {
+                    const txRes = await api.get('/api/ledger/treasury/transactions', { params: { code: firstMatch } });
+                    setTransactions(txRes.data);
+                    setExpandedCode(firstMatch);
+                    setTxSortBy('transaction_date');
+                    setTxSortDir('desc');
+                } catch {}
+                setTxLoading(false);
+            } else if (search) {
+                setExpandedCode(null);
+            }
         } catch { toast(t('sync_failed'), 'error'); }
         setLoading(false);
     }, [search, t]);
@@ -117,7 +142,7 @@ export default function TreasuryPage() {
     };
 
     const saveAccount = async () => {
-        if (!accountNumber || !accountName) { toast(t('msg_fill_all'), 'warning'); return; }
+        if (!accountNumber || (!isExisting && !accountName)) { toast(t('msg_fill_all'), 'warning'); return; }
         setLoading(true);
         try {
             await api.post('/api/ledger/treasury/store', {
@@ -211,6 +236,18 @@ export default function TreasuryPage() {
         } catch (e: any) { toast(e.response?.data?.message || t('msg_wrong_password'), 'error'); }
     };
 
+    const prefillEntry = (code: string) => {
+        const entity = entities.find(e => e.account_number === code);
+        setAccountNumber(code);
+        setAccountName(entity?.account_name || '');
+        setIsExisting(true);
+        setDebit(''); setCredit(''); setDocumentNumber(''); setStatement(''); setPaymentMethod('');
+        setRegistrationDate('');
+        setTimeout(() => {
+            entryFormRef.current?.scrollIntoView({ behavior: 'smooth' });
+        }, 50);
+    };
+
     const paymentOptions = PAYMENT_METHODS.map(p => ({ value: p.value, label: t(p.labelKey) }));
 
     const exportColumns: ColumnDef[] = [
@@ -226,6 +263,7 @@ export default function TreasuryPage() {
         { key: 'transaction_date', label: t('th_trans_date'), render: (v: any) => fmtDate(v) },
         { key: 'logged_at', label: t('th_logged_at'), render: (v: any) => fmtDateTime(v) },
         { key: 'transaction_type', label: t('th_type'), render: (v: any) => v || '' },
+        { key: 'document_number', label: t('th_doc_number'), render: (v: any) => v || '-' },
         { key: 'debit', label: t('th_debit'), render: (v: any) => fmtNum(v), summable: true },
         { key: 'credit', label: t('th_credit'), render: (v: any) => fmtNum(v), summable: true },
         { key: 'new_balance', label: t('th_balance'), render: (v: any) => fmtNum(v) },
@@ -272,7 +310,7 @@ export default function TreasuryPage() {
                         <div className="max-w-lg mx-auto grid grid-cols-1 sm:grid-cols-2 gap-4">
                             <Input label={t('starting_capital')} type="number" value={startingCapital} onChange={(e) => setStartingCapital(e.target.value)} placeholder={t('placeholder_starting_capital')} />
                             <Input label={t('currency')} value={currency} onChange={(e) => setCurrency(e.target.value)} />
-                            <Input label={t('fiscal_year_start')} type="date" value={fiscalYearStart} onChange={(e) => setFiscalYearStart(e.target.value)} />
+                            <DatePickerInput label={t('fiscal_year_start')} value={fiscalYearStart} onChange={setFiscalYearStart} />
                             <Input label={t('initialization_notes')} value={initNotes} onChange={(e) => setInitNotes(e.target.value)} placeholder={t('placeholder_init_notes')} />
                         </div>
                         <div className="mt-6">
@@ -306,6 +344,7 @@ export default function TreasuryPage() {
                     </div>
 
                     {/* Account Entry Form */}
+                    <div ref={entryFormRef}>
                     <Card>
                         <CardHeader title={t('treasury_entry')} />
                         <div className="flex items-end gap-3 mb-6">
@@ -316,11 +355,16 @@ export default function TreasuryPage() {
                         </div>
                         {accountNumber && (
                             <>
-                                {isExisting && <Badge variant="info">{t('account_exists')}</Badge>}
+                                {isExisting && (
+                                    <div className="flex items-center gap-3 mb-4">
+                                        <Badge variant="info">{t('transaction_mode')}</Badge>
+                                        <span className="text-sm font-semibold text-slate-800 dark:text-slate-200">{accountName}</span>
+                                    </div>
+                                )}
                                 {!isExisting && <Badge variant="success">{t('account_new')}</Badge>}
                                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5 mt-5">
-                                    <Input label={t('account_name')} value={accountName} onChange={(e) => setAccountName(e.target.value)} placeholder={t('placeholder_account_name')} />
-                                    <Input label={t('registration_date')} type="date" value={registrationDate} onChange={(e) => setRegistrationDate(e.target.value)} />
+                                    {!isExisting && <Input label={t('account_name')} value={accountName} onChange={(e) => setAccountName(e.target.value)} placeholder={t('placeholder_account_name')} />}
+                                    <DatePickerInput label={isExisting ? t('transaction_date') : t('registration_date')} value={registrationDate} onChange={setRegistrationDate} />
                                     <Input label={t('document_number')} value={documentNumber} onChange={(e) => setDocumentNumber(e.target.value)} placeholder={t('placeholder_document_number')} />
                                     {!isExisting && <Input label={t('opening_balance')} type="number" value={openingBalance} onChange={(e) => setOpeningBalance(e.target.value)} placeholder={t('placeholder_opening_balance')} />}
                                     <Input label={t('debit')} type="number" value={debit} onChange={(e) => setDebit(e.target.value)} placeholder={t('placeholder_debit')} />
@@ -331,11 +375,12 @@ export default function TreasuryPage() {
                                     <Textarea label={t('statement')} value={statement} onChange={(e) => setStatement(e.target.value)} placeholder={t('placeholder_statement')} />
                                 </div>
                                 <div className="flex justify-end mt-6 pt-5 border-t border-slate-200 dark:border-slate-700">
-                                    <Button onClick={saveAccount} loading={loading} size="lg">{t('btn_save_treasury')}</Button>
+                                    <Button onClick={saveAccount} loading={loading} size="lg">{isExisting ? t('btn_add_transaction') : t('btn_save_treasury')}</Button>
                                 </div>
                             </>
                         )}
                     </Card>
+                    </div>
 
                     {/* Accounts Table */}
                     <Card padding="sm">
@@ -366,6 +411,7 @@ export default function TreasuryPage() {
                                     {entities.map((entity) => {
                                         const isExpanded = expandedCode === entity.account_number;
                                         const balance = Number(entity.balance);
+                                        const hasTxMatch = txMatchCodes.includes(entity.account_number);
                                         return (
                                             <React.Fragment key={entity.account_number}>
                                                 <tr className={`transition-colors ${isExpanded ? 'bg-indigo-50/40 dark:bg-indigo-900/20' : 'hover:bg-slate-50/70 dark:hover:bg-slate-700/50'}`}>
@@ -378,6 +424,7 @@ export default function TreasuryPage() {
                                                             <span className="text-sm font-semibold text-indigo-600 dark:text-indigo-400 group-hover:text-indigo-800 dark:group-hover:text-indigo-300 transition-colors">
                                                                 {entity.account_number}
                                                             </span>
+                                                            {hasTxMatch && <span className="w-2 h-2 rounded-full bg-yellow-400 animate-pulse" title={t('th_doc_number')} />}
                                                         </button>
                                                     </td>
                                                     <td className="px-4 py-3.5 text-sm font-medium text-slate-800 dark:text-slate-200">{entity.account_name}</td>
@@ -390,24 +437,36 @@ export default function TreasuryPage() {
                                                         </span>
                                                     </td>
                                                     <td className="px-4 py-3.5">
-                                                        <div className="flex items-center gap-1">
+                                                        <div className="flex items-center gap-1.5">
+                                                            <button
+                                                                onClick={() => prefillEntry(entity.account_number)}
+                                                                className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 transition-colors"
+                                                                title={t('btn_update')}
+                                                            >
+                                                                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                                                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m0-16l-4 4m4-4l4 4" />
+                                                                </svg>
+                                                                {t('btn_update')}
+                                                            </button>
                                                             <button
                                                                 onClick={() => openEdit(entity)}
-                                                                className="p-1.5 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 transition-colors"
+                                                                className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 transition-colors"
                                                                 title={t('btn_edit')}
                                                             >
-                                                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                                                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                                                     <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                                                                 </svg>
+                                                                {t('btn_edit')}
                                                             </button>
                                                             <button
                                                                 onClick={() => setDeleteTarget({ code: entity.account_number, name: entity.account_name ?? '' })}
-                                                                className="p-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                                                                className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
                                                                 title={t('btn_delete')}
                                                             >
-                                                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                                                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                                                     <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                                                                 </svg>
+                                                                {t('btn_delete')}
                                                             </button>
                                                         </div>
                                                     </td>
@@ -430,6 +489,7 @@ export default function TreasuryPage() {
                                                                                 <TxSortHeader col="transaction_date">{t('th_trans_date')}</TxSortHeader>
                                                                                 <TxSortHeader col="logged_at">{t('th_logged_at')}</TxSortHeader>
                                                                                 <TxSortHeader col="transaction_type">{t('th_type')}</TxSortHeader>
+                                                                                <TxSortHeader col="document_number">{t('th_doc_number')}</TxSortHeader>
                                                                                 <TxSortHeader col="debit">{t('th_debit')}</TxSortHeader>
                                                                                 <TxSortHeader col="credit">{t('th_credit')}</TxSortHeader>
                                                                                 <TxSortHeader col="new_balance">{t('th_balance')}</TxSortHeader>
@@ -443,6 +503,13 @@ export default function TreasuryPage() {
                                                                                     <td className="px-3 py-2.5 text-xs text-slate-600 dark:text-slate-400 whitespace-nowrap">{fmtDate(tx.transaction_date)}</td>
                                                                                     <td className="px-3 py-2.5 text-xs text-slate-400 dark:text-slate-500 whitespace-nowrap">{fmtDateTime(tx.logged_at)}</td>
                                                                                     <td className="px-3 py-2.5 text-xs"><Badge>{tx.transaction_type}</Badge></td>
+                                                                                    <td className="px-3 py-2.5 text-xs text-slate-500 dark:text-slate-400 whitespace-nowrap">
+                                                                                        {tx.document_number ? (
+                                                                                            search && tx.document_number.toLowerCase().includes(search.toLowerCase())
+                                                                                                ? <span className="bg-yellow-200 dark:bg-yellow-700 px-1 rounded font-medium">{tx.document_number}</span>
+                                                                                                : tx.document_number
+                                                                                        ) : '-'}
+                                                                                    </td>
                                                                                     <td className="px-3 py-2.5 text-xs text-emerald-600 font-medium tabular-nums">{fmtNum(tx.debit)}</td>
                                                                                     <td className="px-3 py-2.5 text-xs text-red-500 font-medium tabular-nums">{fmtNum(tx.credit)}</td>
                                                                                     <td className="px-3 py-2.5 text-xs font-bold dark:text-slate-100 tabular-nums">{fmtNum(tx.new_balance)}</td>
@@ -451,7 +518,7 @@ export default function TreasuryPage() {
                                                                                 </tr>
                                                                             ))}
                                                                             {transactions.length === 0 && (
-                                                                                <tr><td colSpan={8} className="px-3 py-8 text-center text-xs text-slate-400 dark:text-slate-500">{t('no_transactions')}</td></tr>
+                                                                                <tr><td colSpan={9} className="px-3 py-8 text-center text-xs text-slate-400 dark:text-slate-500">{t('no_transactions')}</td></tr>
                                                                             )}
                                                                         </tbody>
                                                                     </table>
@@ -532,11 +599,10 @@ export default function TreasuryPage() {
                                 value={editFields.account_name ?? ''}
                                 onChange={(e) => setEditFields(f => ({ ...f, account_name: e.target.value }))}
                             />
-                            <Input
+                            <DatePickerInput
                                 label={t('registration_date')}
-                                type="date"
                                 value={editFields.registration_date ?? ''}
-                                onChange={(e) => setEditFields(f => ({ ...f, registration_date: e.target.value }))}
+                                onChange={(v) => setEditFields(f => ({ ...f, registration_date: v }))}
                             />
                             <Input
                                 label={t('document_number')}

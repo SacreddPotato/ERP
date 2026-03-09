@@ -331,6 +331,62 @@ class StockService
                         StockItem::create($backup);
                     }
                 }
+            } elseif ($txType === StockTransactionType::OpeningBalance) {
+                // Reverse creation → check if this is the ONLY log for this item.
+                // If so, delete the item entirely (undo creation).
+                $item = StockItem::where('item_code', $log->item_code)
+                    ->where('factory', $log->factory)
+                    ->lockForUpdate()
+                    ->first();
+
+                if ($item) {
+                    $otherLogs = TransactionLog::where('item_code', $log->item_code)
+                        ->where('factory', $log->factory)
+                        ->where('id', '!=', $logId)
+                        ->where(function ($q) {
+                            $q->whereNull('notes')->orWhere('notes', 'not like', '%[REVERSED]%');
+                        })
+                        ->exists();
+
+                    if (!$otherLogs) {
+                        // No other active transactions → safe to delete item
+                        $backup = $item->toArray();
+                        unset($backup['id'], $backup['created_at'], $backup['updated_at']);
+                        $item->delete();
+                        $log->update(['notes' => ($log->notes ? $log->notes . ' ' : '') . '[REVERSED] [DELETED_ITEM:' . json_encode($backup) . ']']);
+                        return true;
+                    } else {
+                        // Other transactions exist → just subtract the opening balance
+                        $quantity = (float) $log->quantity;
+                        $item->starting_balance = max(0, $item->starting_balance - $quantity);
+                        $item->total_incoming = max(0, $item->total_incoming - $quantity);
+                        $item->recalculateNetStock();
+                        $item->last_updated = now();
+                        $item->save();
+                    }
+                }
+            } elseif ($txType === StockTransactionType::Edited) {
+                // Reverse edit → replay old values from the change log in notes
+                $item = StockItem::where('item_code', $log->item_code)
+                    ->where('factory', $log->factory)
+                    ->lockForUpdate()
+                    ->first();
+
+                if ($item && $log->notes) {
+                    $changes = explode(', ', $log->notes);
+                    foreach ($changes as $change) {
+                        if (preg_match('/^(\w+):\s*(.+?)\s*→\s*(.+)$/', trim($change), $m)) {
+                            $field = $m[1];
+                            $oldValue = $m[2];
+                            if ($item->isFillable($field)) {
+                                $item->{$field} = $oldValue;
+                            }
+                        }
+                    }
+                    $item->recalculateNetStock();
+                    $item->last_updated = now();
+                    $item->save();
+                }
             } else {
                 $item = StockItem::where('item_code', $log->item_code)
                     ->where('factory', $log->factory)
@@ -340,11 +396,8 @@ class StockService
                 if ($item) {
                     $quantity = (float) $log->quantity;
 
-                    if (in_array($txType, [StockTransactionType::Incoming, StockTransactionType::InternalTransferIn, StockTransactionType::InternalTransferNewIn, StockTransactionType::OpeningBalance])) {
+                    if (in_array($txType, [StockTransactionType::Incoming, StockTransactionType::InternalTransferIn, StockTransactionType::InternalTransferNewIn])) {
                         $item->total_incoming = max(0, $item->total_incoming - $quantity);
-                        if ($txType === StockTransactionType::OpeningBalance) {
-                            $item->starting_balance = max(0, $item->starting_balance - $quantity);
-                        }
                     } elseif (in_array($txType, [StockTransactionType::Outgoing, StockTransactionType::InternalTransferOut])) {
                         $item->total_outgoing = max(0, $item->total_outgoing - $quantity);
                     }

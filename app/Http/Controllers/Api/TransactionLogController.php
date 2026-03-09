@@ -4,13 +4,17 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\LedgerLog;
+use App\Services\LedgerService;
 use App\Services\StockService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 class TransactionLogController extends Controller
 {
-    public function __construct(protected StockService $stockService) {}
+    public function __construct(
+        protected StockService $stockService,
+        protected LedgerService $ledgerService,
+    ) {}
 
     public function stock(Request $request): JsonResponse
     {
@@ -48,5 +52,28 @@ class TransactionLogController extends Controller
 
         $logs = $query->orderByDesc('logged_at')->get();
         return response()->json($logs);
+    }
+
+    /**
+     * Unified reverse endpoint for both stock and ledger logs.
+     * Accepts: { log_type: 'stock' | 'ledger', id: number }
+     */
+    public function reverse(Request $request): JsonResponse
+    {
+        $request->validate([
+            'log_type' => 'required|in:stock,ledger',
+            'id' => 'required|integer',
+        ]);
+
+        try {
+            if ($request->input('log_type') === 'stock') {
+                $this->stockService->reverseTransaction($request->input('id'));
+            } else {
+                $this->ledgerService->reverseTransaction($request->input('id'));
+            }
+            return response()->json(['success' => true, 'message' => __('msg_reversed')]);
+        } catch (\Throwable $e) {
+            return response()->json(['success' => false, 'message' => $e->getMessage()], 422);
+        }
     }
 }

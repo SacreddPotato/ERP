@@ -15,7 +15,11 @@ class SyncController extends Controller
         try {
             $service = app(FirebaseSyncService::class);
             $result = $service->pullAll(true);
-            return response()->json(['success' => true, 'result' => $result]);
+            return response()->json([
+                'success' => true,
+                'result' => $result,
+                'warnings' => $result['errors'] ?? [],
+            ]);
         } catch (\Throwable $e) {
             return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
         }
@@ -27,7 +31,11 @@ class SyncController extends Controller
         try {
             $service = app(FirebaseSyncService::class);
             $result = $service->pushAll();
-            return response()->json(['success' => true, 'result' => $result]);
+            return response()->json([
+                'success' => true,
+                'result' => $result,
+                'warnings' => $result['errors'] ?? [],
+            ]);
         } catch (\Throwable $e) {
             return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
         }
@@ -39,7 +47,11 @@ class SyncController extends Controller
         try {
             $service = app(FirebaseSyncService::class);
             $result = $service->forcePull();
-            return response()->json(['success' => true, 'result' => $result]);
+            return response()->json([
+                'success' => true,
+                'result' => $result,
+                'warnings' => $result['errors'] ?? [],
+            ]);
         } catch (\Throwable $e) {
             return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
         }

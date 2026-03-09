@@ -50,6 +50,7 @@ Route::prefix('treasury')->group(function () {
 // Transaction logs
 Route::get('/transactions/stock', [TransactionLogController::class, 'stock']);
 Route::get('/transactions/ledger', [TransactionLogController::class, 'ledger']);
+Route::post('/transactions/reverse', [TransactionLogController::class, 'reverse']);
 
 // Firebase sync
 Route::prefix('sync')->group(function () {
