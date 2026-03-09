@@ -1,0 +1,111 @@
+name: Verify Release Artifacts
+
+on:
+  # Run after build workflow completes
+  workflow_run:
+    workflows: ["Build & Release"]
+    types: [completed]
+  # Allow manual trigger
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+
+    steps:
+      - name: Get latest release info
+        id: release
+        run: |
+          RELEASE=$(curl -s -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${{ github.token }}" \
+            "https://api.github.com/repos/${{ github.repository }}/releases/latest")
+
+          TAG=$(echo "$RELEASE" | jq -r '.tag_name')
+          VERSION=${TAG#v}
+          ASSET_COUNT=$(echo "$RELEASE" | jq '.assets | length')
+
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "asset_count=$ASSET_COUNT" >> $GITHUB_OUTPUT
+          echo "release=$RELEASE" >> $GITHUB_OUTPUT
+
+          echo "Latest release: $TAG ($ASSET_COUNT assets)"
+
+      - name: Verify NSIS setup.exe exists
+        run: |
+          ASSET=$(echo '${{ steps.release.outputs.release }}' | jq -r '.assets[] | select(.name | endswith("-setup.exe")) | .name')
+          if [ -z "$ASSET" ]; then
+            echo "::error::Missing setup.exe in release ${{ steps.release.outputs.tag }}"
+            exit 1
+          fi
+          echo "Found: $ASSET"
+
+      - name: Verify latest.yml exists
+        run: |
+          ASSET=$(echo '${{ steps.release.outputs.release }}' | jq -r '.assets[] | select(.name == "latest.yml") | .name')
+          if [ -z "$ASSET" ]; then
+            echo "::error::Missing latest.yml in release ${{ steps.release.outputs.tag }} — electron-updater will not work"
+            exit 1
+          fi
+          echo "Found: latest.yml"
+
+      - name: Verify blockmap exists
+        run: |
+          ASSET=$(echo '${{ steps.release.outputs.release }}' | jq -r '.assets[] | select(.name | endswith(".blockmap")) | .name')
+          if [ -z "$ASSET" ]; then
+            echo "::warning::Missing blockmap in release ${{ steps.release.outputs.tag }} — delta updates will not work"
+          else
+            echo "Found: $ASSET"
+          fi
+
+      - name: Download and validate latest.yml
+        run: |
+          URL=$(echo '${{ steps.release.outputs.release }}' | jq -r '.assets[] | select(.name == "latest.yml") | .browser_download_url')
+          curl -sL "$URL" -o latest.yml
+
+          echo "--- latest.yml contents ---"
+          cat latest.yml
+          echo "---"
+
+          # Verify it contains the correct version
+          VERSION="${{ steps.release.outputs.version }}"
+          if ! grep -q "version: $VERSION" latest.yml; then
+            echo "::error::latest.yml version mismatch — expected $VERSION"
+            exit 1
+          fi
+
+          # Verify it has a file path
+          if ! grep -q "path:" latest.yml; then
+            echo "::error::latest.yml missing file path"
+            exit 1
+          fi
+
+          # Verify it has a sha512 hash
+          if ! grep -q "sha512:" latest.yml; then
+            echo "::error::latest.yml missing sha512 hash"
+            exit 1
+          fi
+
+          echo "latest.yml validated successfully for v$VERSION"
+
+      - name: Verify version in check-for-updates endpoint
+        run: |
+          # Simulate what the app does: query GitHub API for latest release
+          TAG=$(curl -s -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/releases/latest" \
+            | jq -r '.tag_name')
+          VERSION=${TAG#v}
+
+          echo "GitHub API returns latest: $TAG (version: $VERSION)"
+
+          # Verify it's valid semver (3 parts)
+          if ! echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::Version $VERSION is not valid semver — electron-builder requires X.Y.Z format"
+            exit 1
+          fi
+
+          echo "Version format valid: $VERSION"

@@ -125,3 +125,18 @@ Route::post('/open-url', function (\Illuminate\Http\Request $request) {
         return response()->json(['error' => $e->getMessage()], 500);
     }
 });
+
+Route::get('/update-status', function () {
+    return response()->json(
+        \Illuminate\Support\Facades\Cache::get('update_status', ['status' => 'idle'])
+    );
+});
+
+Route::post('/update-install', function () {
+    try {
+        \Native\Laravel\Facades\AutoUpdater::quitAndInstall();
+        return response()->json(['ok' => true]);
+    } catch (\Throwable $e) {
+        return response()->json(['error' => $e->getMessage()], 500);
+    }
+});

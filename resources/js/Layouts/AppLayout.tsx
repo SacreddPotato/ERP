@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useApp } from '../contexts/AppContext';
 import { ToastContainer, toast } from '../Components/ui/Toast';
 import api from '../lib/api';
@@ -7,41 +7,96 @@ interface AppLayoutProps {
     children: React.ReactNode;
 }
 
-interface UpdateInfo {
-    version: string;
-    downloadUrl: string;
-}
+type UpdateState =
+    | { phase: 'idle' }
+    | { phase: 'checking' }
+    | { phase: 'available'; version: string; downloadUrl: string }
+    | { phase: 'downloading'; version: string; downloadUrl: string; percent: number }
+    | { phase: 'ready'; version: string }
+    | { phase: 'installing' }
+    | { phase: 'error'; message: string; downloadUrl: string };
 
 export default function AppLayout({ children }: AppLayoutProps) {
     const { t, locale, setLocale, factory, setFactory, factories, darkMode, toggleDarkMode, appVersion } = useApp();
-    const [checkingUpdate, setCheckingUpdate] = useState(false);
-    const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
+    const [update, setUpdate] = useState<UpdateState>({ phase: 'idle' });
+    const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-    const checkForUpdates = async () => {
-        setCheckingUpdate(true);
+    const stopPolling = useCallback(() => {
+        if (pollingRef.current) {
+            clearInterval(pollingRef.current);
+            pollingRef.current = null;
+        }
+    }, []);
+
+    // Poll electron-updater status when downloading
+    const startPolling = useCallback((version: string, downloadUrl: string) => {
+        stopPolling();
+        pollingRef.current = setInterval(async () => {
+            try {
+                const res = await api.get('/api/update-status');
+                const s = res.data as { status: string; version?: string; percent?: number; message?: string };
+                if (s.status === 'downloading') {
+                    setUpdate({ phase: 'downloading', version, downloadUrl, percent: s.percent ?? 0 });
+                } else if (s.status === 'ready') {
+                    stopPolling();
+                    setUpdate({ phase: 'ready', version: s.version || version });
+                } else if (s.status === 'error') {
+                    stopPolling();
+                    setUpdate({ phase: 'error', message: s.message || 'Download failed', downloadUrl });
+                }
+            } catch {
+                // Polling failed, keep trying
+            }
+        }, 2000);
+    }, [stopPolling]);
+
+    useEffect(() => () => stopPolling(), [stopPolling]);
+
+    const checkForUpdates = useCallback(async (silent = false) => {
+        if (update.phase === 'checking' || update.phase === 'downloading' || update.phase === 'ready') return;
+        setUpdate({ phase: 'checking' });
         try {
             const res = await api.post('/api/check-for-updates');
             const data = res.data as { current?: string; latest?: string; has_update?: boolean; download_url?: string; error?: string };
             if (data.error) {
-                toast(data.error, 'error');
+                if (!silent) toast(data.error, 'error');
+                setUpdate({ phase: 'idle' });
             } else if (data.has_update && data.latest) {
-                setUpdateInfo({ version: data.latest, downloadUrl: data.download_url || '' });
+                const downloadUrl = data.download_url || '';
+                setUpdate({ phase: 'available', version: data.latest, downloadUrl });
+                // Start polling for electron-updater progress (it was triggered by the backend)
+                startPolling(data.latest, downloadUrl);
             } else {
-                toast(t('update_up_to_date', { version: data.current || appVersion }), 'info');
+                if (!silent) toast(t('update_up_to_date', { version: data.current || appVersion }), 'info');
+                setUpdate({ phase: 'idle' });
             }
         } catch {
-            toast(t('update_check_failed'), 'error');
+            if (!silent) toast(t('update_check_failed'), 'error');
+            setUpdate({ phase: 'idle' });
         }
-        setCheckingUpdate(false);
+    }, [update.phase, t, appVersion, startPolling]);
+
+    // Auto-check on startup (silent — no "up to date" toast)
+    useEffect(() => {
+        const timer = setTimeout(() => checkForUpdates(true), 3000);
+        return () => clearTimeout(timer);
+    }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+    const manualDownload = async (url: string) => {
+        try {
+            await api.post('/api/open-url', { url });
+        } catch {
+            window.open(url, '_blank');
+        }
     };
 
-    const downloadUpdate = async () => {
-        if (!updateInfo?.downloadUrl) return;
+    const installUpdate = async () => {
+        setUpdate({ phase: 'installing' });
         try {
-            await api.post('/api/open-url', { url: updateInfo.downloadUrl });
+            await api.post('/api/update-install');
         } catch {
-            // Fallback: open in current window (Electron may handle this)
-            window.open(updateInfo.downloadUrl, '_blank');
+            toast(t('update_install_failed'), 'error');
+            setUpdate({ phase: 'idle' });
         }
     };
 
@@ -51,6 +106,9 @@ export default function AppLayout({ children }: AppLayoutProps) {
         station: t('loc_station'),
         thaabaneya: t('loc_thaabaneya'),
     };
+
+    const isChecking = update.phase === 'checking';
+    const showBanner = update.phase !== 'idle' && update.phase !== 'checking';
 
     return (
         <div className="min-h-screen flex flex-col bg-gradient-to-b from-slate-50 to-slate-100/80 dark:from-slate-900 dark:to-slate-950 transition-colors duration-300">
@@ -137,35 +195,74 @@ export default function AppLayout({ children }: AppLayoutProps) {
             </header>
 
             {/* Update Banner */}
-            {updateInfo && (
+            {showBanner && (
                 <div className="bg-indigo-600 dark:bg-indigo-700 text-white">
                     <div className="max-w-[1600px] mx-auto px-6 py-2.5 flex items-center justify-between gap-4">
-                        <div className="flex items-center gap-2.5">
-                            <svg className="w-5 h-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                            </svg>
-                            <span className="text-sm font-medium">
-                                {t('update_banner', { current: appVersion, version: updateInfo.version })}
-                            </span>
+                        <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                            {update.phase === 'downloading' ? (
+                                <svg className="w-5 h-5 flex-shrink-0 animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                </svg>
+                            ) : update.phase === 'ready' ? (
+                                <svg className="w-5 h-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                </svg>
+                            ) : update.phase === 'installing' ? (
+                                <svg className="w-5 h-5 flex-shrink-0 animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182" />
+                                </svg>
+                            ) : (
+                                <svg className="w-5 h-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                                </svg>
+                            )}
+                            <div className="min-w-0 flex-1">
+                                <span className="text-sm font-medium">
+                                    {update.phase === 'available' && t('update_banner', { current: appVersion, version: update.version })}
+                                    {update.phase === 'downloading' && t('update_downloading', { version: update.version, percent: String(Math.round(update.percent)) })}
+                                    {update.phase === 'ready' && t('update_ready', { version: update.version })}
+                                    {update.phase === 'installing' && t('update_installing')}
+                                    {update.phase === 'error' && t('update_error', { message: update.message })}
+                                </span>
+                                {/* Progress bar */}
+                                {update.phase === 'downloading' && (
+                                    <div className="mt-1.5 h-1.5 bg-indigo-400/30 rounded-full overflow-hidden">
+                                        <div
+                                            className="h-full bg-white rounded-full transition-all duration-500"
+                                            style={{ width: `${Math.min(update.percent, 100)}%` }}
+                                        />
+                                    </div>
+                                )}
+                            </div>
                         </div>
-                        <div className="flex items-center gap-2">
-                            {updateInfo.downloadUrl && (
+                        <div className="flex items-center gap-2 flex-shrink-0">
+                            {update.phase === 'ready' && (
                                 <button
-                                    onClick={downloadUpdate}
+                                    onClick={installUpdate}
+                                    className="px-3.5 py-1.5 bg-white text-indigo-700 text-xs font-bold rounded-md hover:bg-indigo-50 transition-colors"
+                                >
+                                    {t('btn_restart_update')}
+                                </button>
+                            )}
+                            {(update.phase === 'available' || update.phase === 'error') && 'downloadUrl' in update && update.downloadUrl && (
+                                <button
+                                    onClick={() => manualDownload(update.downloadUrl)}
                                     className="px-3.5 py-1.5 bg-white text-indigo-700 text-xs font-bold rounded-md hover:bg-indigo-50 transition-colors"
                                 >
                                     {t('btn_download_update')}
                                 </button>
                             )}
-                            <button
-                                onClick={() => setUpdateInfo(null)}
-                                className="p-1 rounded hover:bg-indigo-500 transition-colors"
-                                aria-label="Dismiss"
-                            >
-                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                                </svg>
-                            </button>
+                            {update.phase !== 'installing' && (
+                                <button
+                                    onClick={() => { stopPolling(); setUpdate({ phase: 'idle' }); }}
+                                    className="p-1 rounded hover:bg-indigo-500 transition-colors"
+                                    aria-label="Dismiss"
+                                >
+                                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                                    </svg>
+                                </button>
+                            )}
                         </div>
                     </div>
                 </div>
@@ -182,11 +279,11 @@ export default function AppLayout({ children }: AppLayoutProps) {
                     <span className="text-xs text-slate-400 dark:text-slate-500">v{appVersion}</span>
                     <p className="text-xs text-slate-400 dark:text-slate-500">{t('footer_contact')}</p>
                     <button
-                        onClick={checkForUpdates}
-                        disabled={checkingUpdate}
+                        onClick={() => checkForUpdates(false)}
+                        disabled={isChecking}
                         className="inline-flex items-center gap-1.5 text-xs text-slate-400 dark:text-slate-500 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors disabled:opacity-50"
                     >
-                        <svg className={`w-3.5 h-3.5 ${checkingUpdate ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <svg className={`w-3.5 h-3.5 ${isChecking ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                             <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                         </svg>
                         {t('btn_check_updates')}
