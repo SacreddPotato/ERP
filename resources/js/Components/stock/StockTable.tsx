@@ -9,6 +9,7 @@ import { toast } from '../ui/Toast';
 import api from '../../lib/api';
 import { fmtNum, fmtInt } from '../../lib/format';
 import { ExportPrintModal, ColumnDef } from '../ui/ExportPrintModal';
+import { Pagination } from '../ui/Pagination';
 import { StockItem, CATEGORIES, UNITS } from '../../types';
 
 export default function StockTable() {
@@ -23,6 +24,11 @@ export default function StockTable() {
     const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
     const [showExport, setShowExport] = useState(false);
 
+    // Pagination state
+    const [page, setPage] = useState(1);
+    const [pageSize, setPageSize] = useState(25);
+    const [totalItems, setTotalItems] = useState(0);
+
     // Inline edit state
     const [editingCode, setEditingCode] = useState<string | null>(null);
     const [editData, setEditData] = useState<Record<string, any>>({});
@@ -35,14 +41,15 @@ export default function StockTable() {
         setLoading(true);
         try {
             const [itemsRes, lowRes] = await Promise.all([
-                api.get('/api/stock', { params: { search, category: filterCategory, unit: filterUnit } }),
+                api.get('/api/stock', { params: { search, category: filterCategory, unit: filterUnit, page, per_page: pageSize } }),
                 api.get('/api/stock/low-stock'),
             ]);
-            setItems(itemsRes.data);
+            setItems(itemsRes.data.data);
+            setTotalItems(itemsRes.data.total);
             setLowStockItems(lowRes.data);
         } catch { toast(t('sync_failed'), 'error'); }
         setLoading(false);
-    }, [search, filterCategory, filterUnit, t]);
+    }, [search, filterCategory, filterUnit, page, pageSize, t]);
 
     useEffect(() => { fetchItems(); }, [fetchItems, factory]);
 
@@ -145,13 +152,13 @@ export default function StockTable() {
             <Card>
                 <div className="flex flex-wrap items-end gap-4">
                     <div className="flex-1 min-w-[200px]">
-                        <Input placeholder={t('placeholder_search')} value={search} onChange={(e) => setSearch(e.target.value)} />
+                        <Input placeholder={t('placeholder_search')} value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }} />
                     </div>
                     <div className="w-40">
-                        <Select options={catOptions} value={filterCategory} onChange={(e) => setFilterCategory(e.target.value)} />
+                        <Select options={catOptions} value={filterCategory} onChange={(e) => { setFilterCategory(e.target.value); setPage(1); }} />
                     </div>
                     <div className="w-40">
-                        <Select options={unitOptions} value={filterUnit} onChange={(e) => setFilterUnit(e.target.value)} />
+                        <Select options={unitOptions} value={filterUnit} onChange={(e) => { setFilterUnit(e.target.value); setPage(1); }} />
                     </div>
                     <Button variant="secondary" onClick={fetchItems} loading={loading}>{t('btn_refresh')}</Button>
                     <Button variant="ghost" onClick={() => setShowExport(true)}>{t('btn_export')}</Button>
@@ -239,9 +246,17 @@ export default function StockTable() {
                 </div>
                 {sortedItems.length > 0 && (
                     <div className="px-4 py-3 border-t border-slate-200 dark:border-slate-700 text-xs text-slate-500 dark:text-slate-400">
-                        {t('showing_items').replace(':count', String(sortedItems.length))}
+                        {t('showing_items').replace(':count', String(totalItems))}
                     </div>
                 )}
+                <Pagination
+                    currentPage={page}
+                    totalItems={totalItems}
+                    pageSize={pageSize}
+                    onPageChange={setPage}
+                    onPageSizeChange={(s) => { setPageSize(s); setPage(1); }}
+                    t={t}
+                />
             </Card>
 
             <ExportPrintModal

@@ -9,6 +9,7 @@ import { Badge } from '../ui/Badge';
 import { Modal } from '../ui/Modal';
 import { toast } from '../ui/Toast';
 import { ExportPrintModal, ColumnDef, HeaderField } from '../ui/ExportPrintModal';
+import { Pagination } from '../ui/Pagination';
 import api from '../../lib/api';
 import { fmtNum, fmtDate, fmtDateTime } from '../../lib/format';
 import { LedgerEntity, LedgerTotals, LedgerLog, PAYMENT_METHODS } from '../../types';
@@ -52,6 +53,9 @@ export default function LedgerPage({ type }: LedgerPageProps) {
     const [totals, setTotals] = useState<LedgerTotals>({ total_balance: 0, total_opening: 0, total_debit: 0, total_credit: 0, count: 0 });
     const [loading, setLoading] = useState(false);
     const [search, setSearch] = useState('');
+    const [page, setPage] = useState(1);
+    const [pageSize, setPageSize] = useState(25);
+    const [totalItems, setTotalItems] = useState(0);
 
     // Form state
     const [code, setCode] = useState('');
@@ -97,10 +101,12 @@ export default function LedgerPage({ type }: LedgerPageProps) {
     const fetchData = useCallback(async () => {
         setLoading(true);
         try {
-            const res = await api.get(`/api/ledger/${type}`, { params: { search } });
-            setEntities(res.data.entities);
-            setTotals(res.data.totals);
-            const matchCodes: string[] = res.data.tx_match_codes ?? [];
+            const res = await api.get(`/api/ledger/${type}`, { params: { search, page, per_page: pageSize } });
+            const ledgerRes = res;
+            setEntities(ledgerRes.data.entities);
+            setTotals(ledgerRes.data.totals);
+            setTotalItems(ledgerRes.data.total ?? ledgerRes.data.entities.length);
+            const matchCodes: string[] = ledgerRes.data.tx_match_codes ?? [];
             setTxMatchCodes(matchCodes);
 
             // Auto-expand first entity with matching transaction document_numbers
@@ -121,7 +127,7 @@ export default function LedgerPage({ type }: LedgerPageProps) {
             }
         } catch { toast(t('sync_failed'), 'error'); }
         setLoading(false);
-    }, [type, search, t]);
+    }, [type, search, page, pageSize, t]);
 
     useEffect(() => { fetchData(); }, [fetchData]);
 
@@ -379,7 +385,7 @@ export default function LedgerPage({ type }: LedgerPageProps) {
                         <Button variant="ghost" size="xs" onClick={() => setShowExport(true)}>{t('btn_export')}</Button>
                         <Button variant="ghost" size="xs" onClick={() => setShowExport(true)}>{t('btn_print')}</Button>
                         <div className="w-64">
-                            <Input placeholder={t('placeholder_search')} value={search} onChange={(e) => setSearch(e.target.value)} />
+                            <Input placeholder={t('placeholder_search')} value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }} />
                         </div>
                     </div>
                 </div>
@@ -541,10 +547,19 @@ export default function LedgerPage({ type }: LedgerPageProps) {
                 </div>
                 {entities.length > 0 && (
                     <div className="px-4 py-3 border-t border-slate-100 dark:border-slate-700 text-xs text-slate-500 dark:text-slate-400">
-                        {t(cfg.countKey).replace(':count', String(entities.length))}
+                        {t(cfg.countKey).replace(':count', String(totalItems))}
                     </div>
                 )}
             </Card>
+
+            <Pagination
+                currentPage={page}
+                totalItems={totalItems}
+                pageSize={pageSize}
+                onPageChange={setPage}
+                onPageSizeChange={(s) => { setPageSize(s); setPage(1); }}
+                t={t}
+            />
 
             <ExportPrintModal
                 open={showExport}

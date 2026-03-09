@@ -225,6 +225,8 @@
     "th_account_name": "Account Name",
     "no_items": "No items found. Add your first item!",
     "showing_items": "Showing :count items",
+    "pagination_showing": "Showing :from–:to of :total",
+    "pagination_page": "page",
     "no_transactions": "No transactions recorded yet.",
     "showing_transactions": "Showing :count transactions",
 

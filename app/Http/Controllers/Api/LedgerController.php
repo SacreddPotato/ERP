@@ -15,7 +15,9 @@ class LedgerController extends Controller
     public function index(Request $request, string $type): JsonResponse
     {
         $ledgerType = LedgerType::from($type);
-        $entities = $this->service->getAll($ledgerType, $request->only(['search', 'payment_method', 'document_number', 'statement']));
+        $perPage = (int) $request->input('per_page', 25);
+        $page = (int) $request->input('page', 1);
+        $result = $this->service->getAll($ledgerType, $request->only(['search', 'payment_method', 'document_number', 'statement']), $perPage, $page);
         $totals = $this->service->getTotalBalance($ledgerType);
 
         $txMatchCodes = [];
@@ -25,17 +27,23 @@ class LedgerController extends Controller
             // Include entities that have matching transactions but weren't found by entity search
             if (!empty($txMatchCodes)) {
                 $column = $ledgerType->codeColumn();
-                $existingCodes = $entities->pluck($column)->toArray();
+                $existingCodes = $result['data']->pluck($column)->toArray();
                 $missingCodes = array_diff($txMatchCodes, $existingCodes);
                 if (!empty($missingCodes)) {
                     $model = $ledgerType->modelClass();
                     $additional = $model::whereIn($column, $missingCodes)->orderBy($column)->get();
-                    $entities = $entities->merge($additional)->sortBy($column)->values();
+                    $result['data'] = $result['data']->merge($additional)->sortBy($column)->values();
+                    $result['total'] += count($missingCodes);
                 }
             }
         }
 
-        return response()->json(['entities' => $entities, 'totals' => $totals, 'tx_match_codes' => $txMatchCodes]);
+        return response()->json([
+            'entities' => $result['data'],
+            'totals' => $totals,
+            'total' => $result['total'],
+            'tx_match_codes' => $txMatchCodes,
+        ]);
     }
 
     public function generateCode(string $type): JsonResponse

@@ -8,6 +8,7 @@ import { StatCard } from '../ui/StatCard';
 import { Badge } from '../ui/Badge';
 import { Modal } from '../ui/Modal';
 import { ExportPrintModal, ColumnDef, HeaderField } from '../ui/ExportPrintModal';
+import { Pagination } from '../ui/Pagination';
 import { toast } from '../ui/Toast';
 import api from '../../lib/api';
 import { fmtNum, fmtDate, fmtDateTime } from '../../lib/format';
@@ -20,6 +21,9 @@ export default function TreasuryPage() {
     const [totals, setTotals] = useState<LedgerTotals>({ total_balance: 0, total_opening: 0, total_debit: 0, total_credit: 0, count: 0 });
     const [loading, setLoading] = useState(false);
     const [search, setSearch] = useState('');
+    const [page, setPage] = useState(1);
+    const [pageSize, setPageSize] = useState(25);
+    const [totalItems, setTotalItems] = useState(0);
 
     // Init form
     const [startingCapital, setStartingCapital] = useState('');
@@ -71,11 +75,12 @@ export default function TreasuryPage() {
         try {
             const [summaryRes, ledgerRes] = await Promise.all([
                 api.get('/api/treasury/summary'),
-                api.get('/api/ledger/treasury', { params: { search } }),
+                api.get('/api/ledger/treasury', { params: { search, page, per_page: pageSize } }),
             ]);
             setSummary(summaryRes.data);
             setEntities(ledgerRes.data.entities);
             setTotals(ledgerRes.data.totals);
+            setTotalItems(ledgerRes.data.total ?? ledgerRes.data.entities.length);
             const matchCodes: string[] = ledgerRes.data.tx_match_codes ?? [];
             setTxMatchCodes(matchCodes);
 
@@ -96,9 +101,12 @@ export default function TreasuryPage() {
             }
         } catch { toast(t('sync_failed'), 'error'); }
         setLoading(false);
-    }, [search, t]);
+    }, [search, page, pageSize, t]);
 
     useEffect(() => { fetchData(); }, [fetchData]);
+
+    // Reset to first page when search changes
+    useEffect(() => { setPage(1); }, [search]);
 
     const initialize = async () => {
         if (!startingCapital) { toast(t('msg_fill_all'), 'warning'); return; }
@@ -547,6 +555,15 @@ export default function TreasuryPage() {
                             )}
                         </div>
                     </Card>
+
+                    <Pagination
+                        currentPage={page}
+                        totalItems={totalItems}
+                        pageSize={pageSize}
+                        onPageChange={setPage}
+                        onPageSizeChange={(s) => { setPageSize(s); setPage(1); }}
+                        t={t}
+                    />
                 </>
             )}
 

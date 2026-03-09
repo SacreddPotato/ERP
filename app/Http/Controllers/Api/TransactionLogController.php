@@ -18,8 +18,10 @@ class TransactionLogController extends Controller
 
     public function stock(Request $request): JsonResponse
     {
-        $logs = $this->stockService->getFilteredTransactions($request->all());
-        return response()->json($logs);
+        $perPage = (int) $request->input('per_page', 25);
+        $page = (int) $request->input('page', 1);
+        $result = $this->stockService->getFilteredTransactions($request->all(), $perPage, $page);
+        return response()->json($result);
     }
 
     public function ledger(Request $request): JsonResponse
@@ -50,8 +52,12 @@ class TransactionLogController extends Controller
             $query->where('transaction_date', '<=', $request->input('trans_date_to'));
         }
 
-        $logs = $query->orderByDesc('logged_at')->get();
-        return response()->json($logs);
+        $perPage = (int) $request->input('per_page', 25);
+        $page = (int) $request->input('page', 1);
+        $total = $query->count();
+        $data = $query->orderByDesc('logged_at')->skip(($page - 1) * $perPage)->take($perPage)->get();
+
+        return response()->json(['data' => $data, 'total' => $total]);
     }
 
     /**

@@ -14,8 +14,10 @@ class StockController extends Controller
     public function index(Request $request): JsonResponse
     {
         $factory = session('current_factory', config('enterprisflow.default_factory'));
-        $items = $this->service->getFilteredItems($factory, $request->only(['search', 'category', 'supplier', 'unit', 'low_stock']));
-        return response()->json($items);
+        $perPage = (int) $request->input('per_page', 25);
+        $page = (int) $request->input('page', 1);
+        $result = $this->service->getFilteredItems($factory, $request->only(['search', 'category', 'supplier', 'unit', 'low_stock']), $perPage, $page);
+        return response()->json($result);
     }
 
     public function generateId(): JsonResponse

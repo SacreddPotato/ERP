@@ -415,7 +415,7 @@ class StockService
         });
     }
 
-    public function getFilteredItems(string $factory, array $filters = []): Collection
+    public function getFilteredItems(string $factory, array $filters = [], int $perPage = 25, int $page = 1): array
     {
         $query = StockItem::forFactory($factory);
 
@@ -436,10 +436,13 @@ class StockService
             $query->where('net_stock', '<=', $threshold);
         }
 
-        return $query->orderBy('item_code')->get();
+        $total = $query->count();
+        $data = $query->orderBy('item_code')->skip(($page - 1) * $perPage)->take($perPage)->get();
+
+        return ['data' => $data, 'total' => $total];
     }
 
-    public function getFilteredTransactions(array $filters = []): Collection
+    public function getFilteredTransactions(array $filters = [], int $perPage = 25, int $page = 1): array
     {
         $query = TransactionLog::query();
 
@@ -468,7 +471,10 @@ class StockService
             $query->where('document_number', 'like', "%{$filters['document_number']}%");
         }
 
-        return $query->orderByDesc('logged_at')->get();
+        $total = $query->count();
+        $data = $query->orderByDesc('logged_at')->skip(($page - 1) * $perPage)->take($perPage)->get();
+
+        return ['data' => $data, 'total' => $total];
     }
 
     public function getLowStockNotifications(string $factory): Collection

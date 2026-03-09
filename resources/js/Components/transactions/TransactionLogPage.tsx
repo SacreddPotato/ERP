@@ -7,6 +7,7 @@ import { Badge } from '../ui/Badge';
 import { Modal } from '../ui/Modal';
 import { toast } from '../ui/Toast';
 import { ExportPrintModal, ColumnDef } from '../ui/ExportPrintModal';
+import { Pagination } from '../ui/Pagination';
 import { DatePickerInput } from '../ui/DatePickerInput';
 import api from '../../lib/api';
 import { fmtNum, fmtInt, fmtDate, fmtDateTime } from '../../lib/format';
@@ -83,6 +84,11 @@ export default function TransactionLogPage() {
     const [ledgerLogs, setLedgerLogs] = useState<LedgerLog[]>([]);
     const [loading, setLoading] = useState(false);
 
+    // Pagination
+    const [page, setPage] = useState(1);
+    const [pageSize, setPageSize] = useState(25);
+    const [totalItems, setTotalItems] = useState(0);
+
     // Multi-tag search
     const [tags, setTags] = useState<string[]>([]);
     const [tagInput, setTagInput] = useState('');
@@ -112,10 +118,11 @@ export default function TransactionLogPage() {
             const newTag = tagInput.trim();
             if (!tags.includes(newTag)) setTags([...tags, newTag]);
             setTagInput('');
+            setPage(1);
         }
     };
 
-    const removeTag = (index: number) => setTags(tags.filter((_, i) => i !== index));
+    const removeTag = (index: number) => { setTags(tags.filter((_, i) => i !== index)); setPage(1); };
 
     const fetchLogs = useCallback(async () => {
         setLoading(true);
@@ -129,6 +136,8 @@ export default function TransactionLogPage() {
             if (needsStock) {
                 promises.push(api.get('/api/transactions/stock', {
                     params: {
+                        page,
+                        per_page: pageSize,
                         factory: filterFactory || undefined,
                         keyword,
                         date_from: dateFrom || undefined,
@@ -139,13 +148,15 @@ export default function TransactionLogPage() {
                     },
                 }));
             } else {
-                promises.push(Promise.resolve({ data: [] }));
+                promises.push(Promise.resolve({ data: { data: [], total: 0 } }));
             }
 
             if (needsLedger) {
                 const ledgerType = category !== 'all' ? (category as string) : undefined;
                 promises.push(api.get('/api/transactions/ledger', {
                     params: {
+                        page,
+                        per_page: pageSize,
                         keyword,
                         ledger_type: ledgerType,
                         date_from: dateFrom || undefined,
@@ -155,15 +166,18 @@ export default function TransactionLogPage() {
                     },
                 }));
             } else {
-                promises.push(Promise.resolve({ data: [] }));
+                promises.push(Promise.resolve({ data: { data: [], total: 0 } }));
             }
 
             const [stockRes, ledgerRes] = await Promise.all(promises);
-            setStockLogs(stockRes.data);
-            setLedgerLogs(ledgerRes.data);
+            const stockPayload = stockRes.data as { data: TransactionLog[]; total: number };
+            const ledgerPayload = ledgerRes.data as { data: LedgerLog[]; total: number };
+            setStockLogs(stockPayload.data);
+            setLedgerLogs(ledgerPayload.data);
+            setTotalItems(stockPayload.total + ledgerPayload.total);
         } catch { toast(t('sync_failed'), 'error'); }
         setLoading(false);
-    }, [category, tags, searchMode, filterFactory, dateFrom, dateTo, transDateFrom, transDateTo, filterDocNumber, t]);
+    }, [category, tags, searchMode, filterFactory, dateFrom, dateTo, transDateFrom, transDateTo, filterDocNumber, page, pageSize, t]);
 
     useEffect(() => { fetchLogs(); }, [fetchLogs]);
 
@@ -233,7 +247,7 @@ export default function TransactionLogPage() {
     const clearFilters = () => {
         setTags([]); setTagInput(''); setFilterFactory('');
         setDateFrom(''); setDateTo(''); setTransDateFrom(''); setTransDateTo('');
-        setFilterDocNumber('');
+        setFilterDocNumber(''); setPage(1);
     };
 
     const formatChange = (log: UnifiedLog): React.ReactNode => {
@@ -294,7 +308,7 @@ export default function TransactionLogPage() {
                 {LOG_CATEGORIES.map((cat) => (
                     <button
                         key={cat.id}
-                        onClick={() => { setCategory(cat.id); clearFilters(); }}
+                        onClick={() => { setCategory(cat.id); clearFilters(); setPage(1); }}
                         className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-sm font-medium transition-all duration-150 ${
                             category === cat.id
                                 ? 'bg-indigo-600 text-white shadow-sm'
@@ -472,9 +486,17 @@ export default function TransactionLogPage() {
                 </div>
                 {filteredLogs.length > 0 && (
                     <div className="px-4 py-3 border-t border-slate-200 dark:border-slate-700 text-xs text-slate-500 dark:text-slate-400">
-                        {t('showing_activity').replace(':count', String(filteredLogs.length))}
+                        {t('showing_activity').replace(':count', String(totalItems))}
                     </div>
                 )}
+                <Pagination
+                    currentPage={page}
+                    totalItems={totalItems}
+                    pageSize={pageSize}
+                    onPageChange={setPage}
+                    onPageSizeChange={(s) => { setPageSize(s); setPage(1); }}
+                    t={t}
+                />
             </Card>
 
             {/* Export/Print Modal */}

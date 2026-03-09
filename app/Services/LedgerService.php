@@ -275,7 +275,7 @@ class LedgerService
         });
     }
 
-    public function getAll(LedgerType $type, array $filters = []): Collection
+    public function getAll(LedgerType $type, array $filters = [], int $perPage = 25, int $page = 1): array
     {
         $model = $type->modelClass();
         $query = $model::query();
@@ -294,7 +294,10 @@ class LedgerService
         }
 
         $column = $type->codeColumn();
-        return $query->orderBy($column)->get();
+        $total = $query->count();
+        $data = $query->orderBy($column)->skip(($page - 1) * $perPage)->take($perPage)->get();
+
+        return ['data' => $data, 'total' => $total];
     }
 
     public function getTotalBalance(LedgerType $type): array
