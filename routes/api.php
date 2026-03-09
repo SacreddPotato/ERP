@@ -80,8 +80,18 @@ Route::post('/check-for-updates', function () {
         $latestVersion = ltrim($latestTag, 'v');
         $hasUpdate = version_compare($latestVersion, $currentVersion, '>');
 
-        // Trigger electron-updater download if update available
+        // Find the setup.exe download URL from release assets
+        $downloadUrl = null;
         if ($hasUpdate) {
+            $assets = $response->json('assets') ?? [];
+            foreach ($assets as $asset) {
+                if (str_ends_with($asset['name'] ?? '', '-setup.exe')) {
+                    $downloadUrl = $asset['browser_download_url'];
+                    break;
+                }
+            }
+
+            // Trigger electron-updater in background (best effort)
             try {
                 \Native\Laravel\Facades\AutoUpdater::checkForUpdates();
             } catch (\Throwable $e) {
@@ -93,11 +103,25 @@ Route::post('/check-for-updates', function () {
             'current' => $currentVersion,
             'latest' => $latestVersion,
             'has_update' => $hasUpdate,
+            'download_url' => $downloadUrl,
         ]);
     } catch (\Throwable $e) {
         return response()->json([
             'current' => $currentVersion,
             'error' => $e->getMessage(),
         ], 500);
+    }
+});
+
+Route::post('/open-url', function (\Illuminate\Http\Request $request) {
+    $url = $request->input('url');
+    if (!$url || !str_starts_with($url, 'https://github.com/')) {
+        return response()->json(['error' => 'Invalid URL'], 400);
+    }
+    try {
+        \Native\Laravel\Facades\Shell::openExternal($url);
+        return response()->json(['ok' => true]);
+    } catch (\Throwable $e) {
+        return response()->json(['error' => $e->getMessage()], 500);
     }
 });

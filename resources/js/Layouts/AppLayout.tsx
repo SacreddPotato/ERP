@@ -7,19 +7,25 @@ interface AppLayoutProps {
     children: React.ReactNode;
 }
 
+interface UpdateInfo {
+    version: string;
+    downloadUrl: string;
+}
+
 export default function AppLayout({ children }: AppLayoutProps) {
     const { t, locale, setLocale, factory, setFactory, factories, darkMode, toggleDarkMode, appVersion } = useApp();
     const [checkingUpdate, setCheckingUpdate] = useState(false);
+    const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
 
     const checkForUpdates = async () => {
         setCheckingUpdate(true);
         try {
             const res = await api.post('/api/check-for-updates');
-            const data = res.data as { current?: string; latest?: string; has_update?: boolean; error?: string };
+            const data = res.data as { current?: string; latest?: string; has_update?: boolean; download_url?: string; error?: string };
             if (data.error) {
                 toast(data.error, 'error');
-            } else if (data.has_update) {
-                toast(t('update_available', { version: data.latest || '' }), 'success');
+            } else if (data.has_update && data.latest) {
+                setUpdateInfo({ version: data.latest, downloadUrl: data.download_url || '' });
             } else {
                 toast(t('update_up_to_date', { version: data.current || appVersion }), 'info');
             }
@@ -27,6 +33,16 @@ export default function AppLayout({ children }: AppLayoutProps) {
             toast(t('update_check_failed'), 'error');
         }
         setCheckingUpdate(false);
+    };
+
+    const downloadUpdate = async () => {
+        if (!updateInfo?.downloadUrl) return;
+        try {
+            await api.post('/api/open-url', { url: updateInfo.downloadUrl });
+        } catch {
+            // Fallback: open in current window (Electron may handle this)
+            window.open(updateInfo.downloadUrl, '_blank');
+        }
     };
 
     const factoryLabels: Record<string, string> = {
@@ -119,6 +135,41 @@ export default function AppLayout({ children }: AppLayoutProps) {
                     </div>
                 </div>
             </header>
+
+            {/* Update Banner */}
+            {updateInfo && (
+                <div className="bg-indigo-600 dark:bg-indigo-700 text-white">
+                    <div className="max-w-[1600px] mx-auto px-6 py-2.5 flex items-center justify-between gap-4">
+                        <div className="flex items-center gap-2.5">
+                            <svg className="w-5 h-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                            </svg>
+                            <span className="text-sm font-medium">
+                                {t('update_banner', { current: appVersion, version: updateInfo.version })}
+                            </span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            {updateInfo.downloadUrl && (
+                                <button
+                                    onClick={downloadUpdate}
+                                    className="px-3.5 py-1.5 bg-white text-indigo-700 text-xs font-bold rounded-md hover:bg-indigo-50 transition-colors"
+                                >
+                                    {t('btn_download_update')}
+                                </button>
+                            )}
+                            <button
+                                onClick={() => setUpdateInfo(null)}
+                                className="p-1 rounded hover:bg-indigo-500 transition-colors"
+                                aria-label="Dismiss"
+                            >
+                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Main Content */}
             <main className="flex-1 max-w-[1600px] w-full mx-auto px-6 py-6">
