@@ -16,8 +16,12 @@ export function DatePickerInput({ label, value, onChange, placeholder, id, hint 
 
     const parseDate = (v: string): Date | null => {
         if (!v) return null;
-        const parts = v.split('-').map(Number);
-        if (parts.length >= 3) return new Date(parts[0], parts[1] - 1, parts[2]);
+        // Handle ISO datetime strings (e.g. "2024-01-15T00:00:00.000000Z")
+        const dateStr = v.includes('T') ? v.split('T')[0] : v;
+        const parts = dateStr.split('-').map(Number);
+        if (parts.length >= 3 && !isNaN(parts[0]) && !isNaN(parts[1]) && !isNaN(parts[2])) {
+            return new Date(parts[0], parts[1] - 1, parts[2]);
+        }
         return null;
     };
 
