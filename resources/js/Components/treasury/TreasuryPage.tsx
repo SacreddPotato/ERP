@@ -21,6 +21,8 @@ export default function TreasuryPage() {
     const [totals, setTotals] = useState<LedgerTotals>({ total_balance: 0, total_opening: 0, total_debit: 0, total_credit: 0, count: 0 });
     const [loading, setLoading] = useState(false);
     const [search, setSearch] = useState('');
+    const [dateFrom, setDateFrom] = useState('');
+    const [dateTo, setDateTo] = useState('');
     const [page, setPage] = useState(1);
     const [pageSize, setPageSize] = useState(25);
     const [totalItems, setTotalItems] = useState(0);
@@ -75,7 +77,7 @@ export default function TreasuryPage() {
         try {
             const [summaryRes, ledgerRes] = await Promise.all([
                 api.get('/api/treasury/summary'),
-                api.get('/api/ledger/treasury', { params: { search, page, per_page: pageSize } }),
+                api.get('/api/ledger/treasury', { params: { search, page, per_page: pageSize, date_from: dateFrom || undefined, date_to: dateTo || undefined } }),
             ]);
             setSummary(summaryRes.data);
             setEntities(ledgerRes.data.entities);
@@ -101,7 +103,7 @@ export default function TreasuryPage() {
             }
         } catch { toast(t('sync_failed'), 'error'); }
         setLoading(false);
-    }, [search, page, pageSize, t]);
+    }, [search, page, pageSize, dateFrom, dateTo, t]);
 
     useEffect(() => { fetchData(); }, [fetchData]);
 
@@ -397,6 +399,12 @@ export default function TreasuryPage() {
                             <div className="flex items-center gap-2">
                                 <Button variant="ghost" size="xs" onClick={() => setShowExport(true)}>{t('btn_export')}</Button>
                                 <Button variant="ghost" size="xs" onClick={() => setShowExport(true)}>{t('btn_print')}</Button>
+                                <div className="w-36">
+                                    <DatePickerInput value={dateFrom} onChange={(v) => { setDateFrom(v); setPage(1); }} placeholder={t('filter_date_from_label')} />
+                                </div>
+                                <div className="w-36">
+                                    <DatePickerInput value={dateTo} onChange={(v) => { setDateTo(v); setPage(1); }} placeholder={t('filter_date_to_label')} />
+                                </div>
                                 <div className="w-64">
                                     <Input placeholder={t('placeholder_search')} value={search} onChange={(e) => setSearch(e.target.value)} />
                                 </div>
@@ -575,6 +583,10 @@ export default function TreasuryPage() {
                 data={entities}
                 filename="treasury_accounts"
                 t={t}
+                onFetchAll={async () => {
+                    const res = await api.get('/api/ledger/treasury', { params: { search, per_page: 999999, page: 1, date_from: dateFrom || undefined, date_to: dateTo || undefined } });
+                    return res.data.entities;
+                }}
             />
 
             {txExport && (() => {

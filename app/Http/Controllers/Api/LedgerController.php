@@ -17,7 +17,7 @@ class LedgerController extends Controller
         $ledgerType = LedgerType::from($type);
         $perPage = (int) $request->input('per_page', 25);
         $page = (int) $request->input('page', 1);
-        $result = $this->service->getAll($ledgerType, $request->only(['search', 'payment_method', 'document_number', 'statement']), $perPage, $page);
+        $result = $this->service->getAll($ledgerType, $request->only(['search', 'payment_method', 'document_number', 'statement', 'date_from', 'date_to']), $perPage, $page);
         $totals = $this->service->getTotalBalance($ledgerType);
 
         $txMatchCodes = [];

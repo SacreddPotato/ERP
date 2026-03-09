@@ -16,7 +16,7 @@ class StockController extends Controller
         $factory = session('current_factory', config('enterprisflow.default_factory'));
         $perPage = (int) $request->input('per_page', 25);
         $page = (int) $request->input('page', 1);
-        $result = $this->service->getFilteredItems($factory, $request->only(['search', 'category', 'supplier', 'unit', 'low_stock']), $perPage, $page);
+        $result = $this->service->getFilteredItems($factory, $request->only(['search', 'category', 'supplier', 'unit', 'low_stock', 'date_from', 'date_to']), $perPage, $page);
         return response()->json($result);
     }
 

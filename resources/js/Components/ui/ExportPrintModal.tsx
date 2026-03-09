@@ -28,6 +28,8 @@ interface ExportPrintModalProps {
     data: any[];
     filename: string;
     t: (key: string) => string;
+    /** When provided, shows a "Current Page / All Pages" toggle. Callback fetches all data. */
+    onFetchAll?: () => Promise<any[]>;
 }
 
 function escapeHtml(str: string): string {
@@ -38,11 +40,19 @@ function escapeHtml(str: string): string {
         .replace(/"/g, '&quot;');
 }
 
-export function ExportPrintModal({ open, onClose, title, subtitle, headerFields, columns, data, filename, t }: ExportPrintModalProps) {
+export function ExportPrintModal({ open, onClose, title, subtitle, headerFields, columns, data, filename, t, onFetchAll }: ExportPrintModalProps) {
     const [selected, setSelected] = useState<Set<string>>(new Set());
+    const [useAllPages, setUseAllPages] = useState(false);
+    const [allData, setAllData] = useState<any[] | null>(null);
+    const [fetchingAll, setFetchingAll] = useState(false);
 
     useEffect(() => {
-        if (open) setSelected(new Set(columns.map(c => c.key)));
+        if (open) {
+            setSelected(new Set(columns.map(c => c.key)));
+            setUseAllPages(false);
+            setAllData(null);
+            setFetchingAll(false);
+        }
     }, [open, columns]);
 
     const toggleColumn = (key: string) => {
@@ -59,6 +69,23 @@ export function ExportPrintModal({ open, onClose, title, subtitle, headerFields,
 
     const getSelectedColumns = () => columns.filter(c => selected.has(c.key));
 
+    // Effective data: either all-pages data or current page data
+    const effectiveData = useAllPages && allData ? allData : data;
+
+    const handleToggleAllPages = async (wantAll: boolean) => {
+        setUseAllPages(wantAll);
+        if (wantAll && !allData && onFetchAll) {
+            setFetchingAll(true);
+            try {
+                const result = await onFetchAll();
+                setAllData(result);
+            } catch {
+                setUseAllPages(false);
+            }
+            setFetchingAll(false);
+        }
+    };
+
     const getRawValue = (col: ColumnDef, row: any): string => {
         const val = row[col.key];
         if (val == null) return '';
@@ -72,11 +99,11 @@ export function ExportPrintModal({ open, onClose, title, subtitle, headerFields,
         return String(val);
     };
 
-    const computeTotals = (cols: ColumnDef[]) => {
+    const computeTotals = (cols: ColumnDef[], rows: any[]) => {
         if (!cols.some(c => c.summable)) return null;
         const sums: Record<string, number> = {};
         cols.forEach(c => { if (c.summable) sums[c.key] = 0; });
-        data.forEach(row => {
+        rows.forEach(row => {
             cols.forEach(c => {
                 if (c.summable) sums[c.key] += Number(row[c.key]) || 0;
             });
@@ -87,7 +114,8 @@ export function ExportPrintModal({ open, onClose, title, subtitle, headerFields,
     const exportExcel = () => {
         const cols = getSelectedColumns();
         if (cols.length === 0) return;
-        const sums = computeTotals(cols);
+        const rows = effectiveData;
+        const sums = computeTotals(cols, rows);
 
         let html = '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel">';
         html += '<head><meta charset="utf-8">';
@@ -102,7 +130,7 @@ export function ExportPrintModal({ open, onClose, title, subtitle, headerFields,
         }
         html += '<table>';
         html += '<tr>' + cols.map(c => `<th>${escapeHtml(c.label)}</th>`).join('') + '</tr>';
-        data.forEach(row => {
+        rows.forEach(row => {
             html += '<tr>';
             cols.forEach(col => {
                 const raw = row[col.key];
@@ -142,7 +170,8 @@ export function ExportPrintModal({ open, onClose, title, subtitle, headerFields,
     const printTable = () => {
         const cols = getSelectedColumns();
         if (cols.length === 0) return;
-        const sums = computeTotals(cols);
+        const rows = effectiveData;
+        const sums = computeTotals(cols, rows);
 
         const printWindow = window.open('', '_blank');
         if (!printWindow) return;
@@ -180,11 +209,11 @@ export function ExportPrintModal({ open, onClose, title, subtitle, headerFields,
             }
             html += '</tbody></table>';
         }
-        html += `<p class="meta">${data.length} rows &mdash; ${new Date().toLocaleDateString()}</p>`;
+        html += `<p class="meta">${rows.length} rows &mdash; ${new Date().toLocaleDateString()}</p>`;
         html += '<table><thead><tr>';
         cols.forEach(c => { html += `<th>${escapeHtml(c.label)}</th>`; });
         html += '</tr></thead><tbody>';
-        data.forEach(row => {
+        rows.forEach(row => {
             html += '<tr>';
             cols.forEach(c => { html += `<td>${escapeHtml(getDisplayValue(c, row))}</td>`; });
             html += '</tr>';
@@ -214,6 +243,43 @@ export function ExportPrintModal({ open, onClose, title, subtitle, headerFields,
 
     return (
         <Modal open={open} onClose={onClose} title={t('export_options')} maxWidth="lg">
+            {/* Page scope toggle — only when onFetchAll is provided */}
+            {onFetchAll && (
+                <div className="flex items-center gap-1 mb-4 p-1 bg-slate-100 dark:bg-slate-700/50 rounded-lg w-fit">
+                    <button
+                        type="button"
+                        onClick={() => handleToggleAllPages(false)}
+                        className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-all ${
+                            !useAllPages
+                                ? 'bg-white dark:bg-slate-600 text-slate-800 dark:text-slate-100 shadow-sm'
+                                : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'
+                        }`}
+                    >
+                        {t('print_current_page')}
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => handleToggleAllPages(true)}
+                        disabled={fetchingAll}
+                        className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-all ${
+                            useAllPages
+                                ? 'bg-white dark:bg-slate-600 text-slate-800 dark:text-slate-100 shadow-sm'
+                                : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'
+                        } disabled:opacity-50`}
+                    >
+                        {fetchingAll ? (
+                            <span className="inline-flex items-center gap-1.5">
+                                <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
+                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                                </svg>
+                                {t('loading_all_data')}
+                            </span>
+                        ) : t('print_all_pages')}
+                    </button>
+                </div>
+            )}
+
             <p className="text-sm text-slate-600 dark:text-slate-400 mb-3">{t('select_columns')}</p>
             <div className="flex items-center gap-2 mb-3">
                 <button type="button" onClick={selectAll} className="text-xs text-indigo-600 hover:text-indigo-800 dark:text-indigo-400 dark:hover:text-indigo-300 font-medium">
@@ -243,20 +309,28 @@ export function ExportPrintModal({ open, onClose, title, subtitle, headerFields,
                     </label>
                 ))}
             </div>
-            <div className="flex justify-end gap-3 pt-4 border-t border-slate-200 dark:border-slate-700">
-                <Button variant="secondary" onClick={onClose}>{t('btn_cancel')}</Button>
-                <Button variant="secondary" onClick={printTable} disabled={selected.size === 0}>
-                    <svg className="w-4 h-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
-                    </svg>
-                    {t('btn_print')}
-                </Button>
-                <Button onClick={exportExcel} disabled={selected.size === 0}>
-                    <svg className="w-4 h-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                    </svg>
-                    {t('btn_export_excel')}
-                </Button>
+            <div className="flex items-center justify-between pt-4 border-t border-slate-200 dark:border-slate-700">
+                {onFetchAll && (
+                    <span className="text-xs text-slate-400 dark:text-slate-500">
+                        {effectiveData.length} rows
+                    </span>
+                )}
+                {!onFetchAll && <span />}
+                <div className="flex gap-3">
+                    <Button variant="secondary" onClick={onClose}>{t('btn_cancel')}</Button>
+                    <Button variant="secondary" onClick={printTable} disabled={selected.size === 0 || fetchingAll}>
+                        <svg className="w-4 h-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+                        </svg>
+                        {t('btn_print')}
+                    </Button>
+                    <Button onClick={exportExcel} disabled={selected.size === 0 || fetchingAll}>
+                        <svg className="w-4 h-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                        </svg>
+                        {t('btn_export_excel')}
+                    </Button>
+                </div>
             </div>
         </Modal>
     );

@@ -292,6 +292,12 @@ class LedgerService
         if (!empty($filters['statement'])) {
             $query->where('statement', 'like', "%{$filters['statement']}%");
         }
+        if (!empty($filters['date_from'])) {
+            $query->where('registration_date', '>=', $filters['date_from']);
+        }
+        if (!empty($filters['date_to'])) {
+            $query->where('registration_date', '<=', $filters['date_to']);
+        }
 
         $column = $type->codeColumn();
         $total = $query->count();

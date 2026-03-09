@@ -438,6 +438,12 @@
     "showing_activity": "Showing :count entries",
     "reversed_label": "REVERSED",
 
+    "filter_date_from_label": "From",
+    "filter_date_to_label": "To",
+    "print_current_page": "Current Page",
+    "print_all_pages": "All Pages",
+    "loading_all_data": "Loading all data...",
+
     "language": "Language",
     "lang_en": "English",
     "lang_ar": "\u0627\u0644\u0639\u0631\u0628\u064a\u0629"

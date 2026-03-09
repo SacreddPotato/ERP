@@ -295,6 +295,23 @@ export default function TransactionLogPage() {
         { key: 'action', label: t('th_action') },
         { key: 'code', label: t('th_code') },
         { key: 'name', label: t('th_name') },
+        {
+            key: '_change',
+            label: t('th_change'),
+            render: (_v: any, row: any) => {
+                if (row.source === 'stock') {
+                    const qty = Number(row.quantity) || 0;
+                    return qty === 0 ? '-' : fmtInt(qty);
+                }
+                const d = Number(row.debit) || 0;
+                const c = Number(row.credit) || 0;
+                if (d === 0 && c === 0) return '-';
+                const parts: string[] = [];
+                if (d > 0) parts.push(fmtNum(d));
+                if (c > 0) parts.push(fmtNum(c));
+                return parts.join(' / ');
+            },
+        },
         { key: 'new_value', label: t('th_balance'), render: (v) => fmtNum(v), summable: true },
         { key: 'detail', label: t('th_detail'), render: (v: any) => cleanDetail(v) },
     ];
@@ -508,6 +525,62 @@ export default function TransactionLogPage() {
                 data={filteredLogs}
                 filename="activity_log"
                 t={t}
+                onFetchAll={async () => {
+                    const keyword = tags.length > 0 ? tags.join(searchMode === 'AND' ? ' ' : '|') : undefined;
+                    const needsStockAll = category === 'all' || category === 'stock';
+                    const needsLedgerAll = category === 'all' || category !== 'stock';
+                    const ledgerTypeAll = category !== 'all' && category !== 'stock' ? (category as string) : undefined;
+
+                    const allPromises: Promise<any>[] = [];
+
+                    if (needsStockAll) {
+                        allPromises.push(api.get('/api/transactions/stock', {
+                            params: {
+                                page: 1,
+                                per_page: 999999,
+                                factory: filterFactory || undefined,
+                                keyword,
+                                date_from: dateFrom || undefined,
+                                date_to: dateTo || undefined,
+                                trans_date_from: transDateFrom || undefined,
+                                trans_date_to: transDateTo || undefined,
+                                document_number: filterDocNumber || undefined,
+                            },
+                        }));
+                    } else {
+                        allPromises.push(Promise.resolve({ data: { data: [] } }));
+                    }
+
+                    if (needsLedgerAll) {
+                        allPromises.push(api.get('/api/transactions/ledger', {
+                            params: {
+                                page: 1,
+                                per_page: 999999,
+                                keyword,
+                                ledger_type: ledgerTypeAll,
+                                date_from: dateFrom || undefined,
+                                date_to: dateTo || undefined,
+                                trans_date_from: transDateFrom || undefined,
+                                trans_date_to: transDateTo || undefined,
+                            },
+                        }));
+                    } else {
+                        allPromises.push(Promise.resolve({ data: { data: [] } }));
+                    }
+
+                    const [stockAll, ledgerAll] = await Promise.all(allPromises);
+                    const allStockData = (stockAll.data as { data: TransactionLog[] }).data;
+                    const allLedgerData = (ledgerAll.data as { data: LedgerLog[] }).data;
+
+                    const unified: UnifiedLog[] = [
+                        ...allStockData.map(stockToUnified),
+                        ...allLedgerData.map(ledgerToUnified),
+                    ];
+
+                    return unified
+                        .filter(log => matchesTags(getSearchableText(log)))
+                        .sort((a, b) => compareValues((a as any)[sortBy], (b as any)[sortBy], sortDir));
+                }}
             />
 
             {/* Reverse Confirmation Modal */}

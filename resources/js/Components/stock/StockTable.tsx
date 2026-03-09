@@ -9,6 +9,7 @@ import { toast } from '../ui/Toast';
 import api from '../../lib/api';
 import { fmtNum, fmtInt } from '../../lib/format';
 import { ExportPrintModal, ColumnDef } from '../ui/ExportPrintModal';
+import { DatePickerInput } from '../ui/DatePickerInput';
 import { Pagination } from '../ui/Pagination';
 import { StockItem, CATEGORIES, UNITS } from '../../types';
 
@@ -23,6 +24,8 @@ export default function StockTable() {
     const [sortBy, setSortBy] = useState('item_code');
     const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
     const [showExport, setShowExport] = useState(false);
+    const [dateFrom, setDateFrom] = useState('');
+    const [dateTo, setDateTo] = useState('');
 
     // Pagination state
     const [page, setPage] = useState(1);
@@ -41,7 +44,7 @@ export default function StockTable() {
         setLoading(true);
         try {
             const [itemsRes, lowRes] = await Promise.all([
-                api.get('/api/stock', { params: { search, category: filterCategory, unit: filterUnit, page, per_page: pageSize } }),
+                api.get('/api/stock', { params: { search, category: filterCategory, unit: filterUnit, page, per_page: pageSize, date_from: dateFrom || undefined, date_to: dateTo || undefined } }),
                 api.get('/api/stock/low-stock'),
             ]);
             setItems(itemsRes.data.data);
@@ -49,7 +52,7 @@ export default function StockTable() {
             setLowStockItems(lowRes.data);
         } catch { toast(t('sync_failed'), 'error'); }
         setLoading(false);
-    }, [search, filterCategory, filterUnit, page, pageSize, t]);
+    }, [search, filterCategory, filterUnit, page, pageSize, dateFrom, dateTo, t]);
 
     useEffect(() => { fetchItems(); }, [fetchItems, factory]);
 
@@ -160,6 +163,12 @@ export default function StockTable() {
                     <div className="w-40">
                         <Select options={unitOptions} value={filterUnit} onChange={(e) => { setFilterUnit(e.target.value); setPage(1); }} />
                     </div>
+                    <div className="w-40">
+                        <DatePickerInput value={dateFrom} onChange={(v) => { setDateFrom(v); setPage(1); }} placeholder={t('filter_date_from_label')} />
+                    </div>
+                    <div className="w-40">
+                        <DatePickerInput value={dateTo} onChange={(v) => { setDateTo(v); setPage(1); }} placeholder={t('filter_date_to_label')} />
+                    </div>
                     <Button variant="secondary" onClick={fetchItems} loading={loading}>{t('btn_refresh')}</Button>
                     <Button variant="ghost" onClick={() => setShowExport(true)}>{t('btn_export')}</Button>
                     <Button variant="ghost" onClick={() => setShowExport(true)}>{t('btn_print')}</Button>
@@ -267,6 +276,10 @@ export default function StockTable() {
                 data={sortedItems}
                 filename={`stock_${factory}`}
                 t={t}
+                onFetchAll={async () => {
+                    const res = await api.get('/api/stock', { params: { search, category: filterCategory, unit: filterUnit, date_from: dateFrom || undefined, date_to: dateTo || undefined, per_page: 999999, page: 1 } });
+                    return res.data.data;
+                }}
             />
 
             {/* Delete Modal */}

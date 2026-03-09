@@ -53,6 +53,8 @@ export default function LedgerPage({ type }: LedgerPageProps) {
     const [totals, setTotals] = useState<LedgerTotals>({ total_balance: 0, total_opening: 0, total_debit: 0, total_credit: 0, count: 0 });
     const [loading, setLoading] = useState(false);
     const [search, setSearch] = useState('');
+    const [dateFrom, setDateFrom] = useState('');
+    const [dateTo, setDateTo] = useState('');
     const [page, setPage] = useState(1);
     const [pageSize, setPageSize] = useState(25);
     const [totalItems, setTotalItems] = useState(0);
@@ -101,7 +103,7 @@ export default function LedgerPage({ type }: LedgerPageProps) {
     const fetchData = useCallback(async () => {
         setLoading(true);
         try {
-            const res = await api.get(`/api/ledger/${type}`, { params: { search, page, per_page: pageSize } });
+            const res = await api.get(`/api/ledger/${type}`, { params: { search, page, per_page: pageSize, date_from: dateFrom || undefined, date_to: dateTo || undefined } });
             const ledgerRes = res;
             setEntities(ledgerRes.data.entities);
             setTotals(ledgerRes.data.totals);
@@ -127,7 +129,7 @@ export default function LedgerPage({ type }: LedgerPageProps) {
             }
         } catch { toast(t('sync_failed'), 'error'); }
         setLoading(false);
-    }, [type, search, page, pageSize, t]);
+    }, [type, search, page, pageSize, dateFrom, dateTo, t]);
 
     useEffect(() => { fetchData(); }, [fetchData]);
 
@@ -384,6 +386,12 @@ export default function LedgerPage({ type }: LedgerPageProps) {
                     <div className="flex items-center gap-2">
                         <Button variant="ghost" size="xs" onClick={() => setShowExport(true)}>{t('btn_export')}</Button>
                         <Button variant="ghost" size="xs" onClick={() => setShowExport(true)}>{t('btn_print')}</Button>
+                        <div className="w-36">
+                            <DatePickerInput value={dateFrom} onChange={(v) => { setDateFrom(v); setPage(1); }} placeholder={t('filter_date_from_label')} />
+                        </div>
+                        <div className="w-36">
+                            <DatePickerInput value={dateTo} onChange={(v) => { setDateTo(v); setPage(1); }} placeholder={t('filter_date_to_label')} />
+                        </div>
                         <div className="w-64">
                             <Input placeholder={t('placeholder_search')} value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }} />
                         </div>
@@ -569,6 +577,10 @@ export default function LedgerPage({ type }: LedgerPageProps) {
                 data={entities}
                 filename={`ledger_${type}`}
                 t={t}
+                onFetchAll={async () => {
+                    const res = await api.get(`/api/ledger/${type}`, { params: { search, per_page: 999999, page: 1, date_from: dateFrom || undefined, date_to: dateTo || undefined } });
+                    return res.data.entities;
+                }}
             />
 
             {txExport && (() => {
