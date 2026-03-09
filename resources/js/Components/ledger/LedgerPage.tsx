@@ -7,7 +7,7 @@ import { StatCard } from '../ui/StatCard';
 import { Badge } from '../ui/Badge';
 import { Modal } from '../ui/Modal';
 import { toast } from '../ui/Toast';
-import { ExportPrintModal, ColumnDef } from '../ui/ExportPrintModal';
+import { ExportPrintModal, ColumnDef, HeaderField } from '../ui/ExportPrintModal';
 import api from '../../lib/api';
 import { fmtNum, fmtDate, fmtDateTime } from '../../lib/format';
 import { LedgerEntity, LedgerTotals, LedgerLog, PAYMENT_METHODS } from '../../types';
@@ -76,7 +76,7 @@ export default function LedgerPage({ type }: LedgerPageProps) {
     // Export modal
     const [showExport, setShowExport] = useState(false);
     // Per-entity tx export modal
-    const [txExport, setTxExport] = useState<{ code: string; name: string; data: LedgerLog[] } | null>(null);
+    const [txExport, setTxExport] = useState<{ code: string; name: string; entity: LedgerEntity; data: LedgerLog[] } | null>(null);
 
     // Edit modal
     const [editTarget, setEditTarget] = useState<LedgerEntity | null>(null);
@@ -445,7 +445,7 @@ export default function LedgerPage({ type }: LedgerPageProps) {
                                                         )}
                                                         {!txLoading && sortedTransactions.length > 0 && (
                                                             <div className="px-3 py-2 border-t border-slate-200 dark:border-slate-600 flex justify-end bg-slate-50/50 dark:bg-slate-700/30">
-                                                                <Button size="xs" variant="ghost" onClick={() => setTxExport({ code: entityCode, name: entityDisplayName, data: sortedTransactions })}>
+                                                                <Button size="xs" variant="ghost" onClick={() => setTxExport({ code: entityCode, name: entityDisplayName, entity, data: sortedTransactions })}>
                                                                     <svg className="w-3.5 h-3.5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                                                         <path strokeLinecap="round" strokeLinejoin="round" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
                                                                     </svg>
@@ -483,18 +483,31 @@ export default function LedgerPage({ type }: LedgerPageProps) {
                 t={t}
             />
 
-            {txExport && (
-                <ExportPrintModal
-                    open={true}
-                    onClose={() => setTxExport(null)}
-                    title={t(cfg.listKey)}
-                    subtitle={`${txExport.code} — ${txExport.name}`}
-                    columns={txExportColumns}
-                    data={txExport.data}
-                    filename={`${type}_${txExport.code}_transactions`}
-                    t={t}
-                />
-            )}
+            {txExport && (() => {
+                const e = txExport.entity;
+                const hf: HeaderField[] = [
+                    { label: t('th_id'), value: txExport.code },
+                    { label: t('th_name'), value: txExport.name },
+                    ...(cfg.hasPhone && e.phone ? [{ label: t('th_phone'), value: e.phone }] : []),
+                    { label: t('th_opening_balance'), value: fmtNum(e.opening_balance) },
+                    { label: t('th_debit'), value: fmtNum(e.debit) },
+                    { label: t('th_credit'), value: fmtNum(e.credit) },
+                    { label: t('th_balance'), value: fmtNum(e.balance) },
+                ];
+                return (
+                    <ExportPrintModal
+                        open={true}
+                        onClose={() => setTxExport(null)}
+                        title={t(cfg.listKey)}
+                        subtitle={`${txExport.code} — ${txExport.name}`}
+                        headerFields={hf}
+                        columns={txExportColumns}
+                        data={txExport.data}
+                        filename={`${type}_${txExport.code}_transactions`}
+                        t={t}
+                    />
+                );
+            })()}
 
             {/* Edit Modal */}
             <Modal open={!!editTarget} onClose={() => setEditTarget(null)} title={t('btn_edit')}>

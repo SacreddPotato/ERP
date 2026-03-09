@@ -11,12 +11,19 @@ export interface ColumnDef {
     summable?: boolean;
 }
 
+export interface HeaderField {
+    label: string;
+    value: string;
+}
+
 interface ExportPrintModalProps {
     open: boolean;
     onClose: () => void;
     title: string;
     /** Optional subtitle displayed below the title (e.g. entity code + name). */
     subtitle?: string;
+    /** Key-value details shown as a summary block above the table (e.g. parent entity info). */
+    headerFields?: HeaderField[];
     columns: ColumnDef[];
     data: any[];
     filename: string;
@@ -31,7 +38,7 @@ function escapeHtml(str: string): string {
         .replace(/"/g, '&quot;');
 }
 
-export function ExportPrintModal({ open, onClose, title, subtitle, columns, data, filename, t }: ExportPrintModalProps) {
+export function ExportPrintModal({ open, onClose, title, subtitle, headerFields, columns, data, filename, t }: ExportPrintModalProps) {
     const [selected, setSelected] = useState<Set<string>>(new Set());
 
     useEffect(() => {
@@ -84,8 +91,16 @@ export function ExportPrintModal({ open, onClose, title, subtitle, columns, data
 
         let html = '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel">';
         html += '<head><meta charset="utf-8">';
-        html += '<style>td,th{border:1px solid #ccc;padding:4px 8px;font-family:Arial;font-size:12px}th{background:#f0f0f0;font-weight:bold}.total{background:#e8e8e8;font-weight:bold}</style>';
-        html += '</head><body><table>';
+        html += '<style>td,th{border:1px solid #ccc;padding:4px 8px;font-family:Arial;font-size:12px}th{background:#f0f0f0;font-weight:bold}.total{background:#e8e8e8;font-weight:bold}.hdr-label{background:#f0f0f0;font-weight:bold;width:160px}</style>';
+        html += '</head><body>';
+        if (headerFields && headerFields.length > 0) {
+            html += '<table style="margin-bottom:12px">';
+            headerFields.forEach(f => {
+                html += `<tr><td class="hdr-label">${escapeHtml(f.label)}</td><td>${escapeHtml(f.value)}</td></tr>`;
+            });
+            html += '</table>';
+        }
+        html += '<table>';
         html += '<tr>' + cols.map(c => `<th>${escapeHtml(c.label)}</th>`).join('') + '</tr>';
         data.forEach(row => {
             html += '<tr>';
@@ -139,6 +154,9 @@ export function ExportPrintModal({ open, onClose, title, subtitle, columns, data
         html += 'h2{margin-bottom:4px;font-size:18px}';
         html += '.subtitle{font-size:13px;color:#444;margin-bottom:2px}';
         html += '.meta{font-size:11px;color:#666;margin-bottom:12px}';
+        html += '.header-block{margin-bottom:14px;border:1px solid #999;border-collapse:collapse}';
+        html += '.header-block td{border:1px solid #ccc;padding:4px 10px;font-size:12px}';
+        html += '.header-block .hl{background:#f0f0f0;font-weight:bold;width:160px;white-space:nowrap}';
         html += 'table{width:100%;border-collapse:collapse}';
         html += 'th,td{border:1px solid #333;padding:6px 10px;font-size:12px;text-align:left}';
         html += 'th{background:#f0f0f0;font-weight:bold}';
@@ -148,6 +166,20 @@ export function ExportPrintModal({ open, onClose, title, subtitle, columns, data
         html += '</style></head><body>';
         html += `<h2>${escapeHtml(title)}</h2>`;
         if (subtitle) html += `<p class="subtitle">${escapeHtml(subtitle)}</p>`;
+        if (headerFields && headerFields.length > 0) {
+            html += '<table class="header-block"><tbody>';
+            for (let i = 0; i < headerFields.length; i += 2) {
+                html += '<tr>';
+                html += `<td class="hl">${escapeHtml(headerFields[i].label)}</td><td>${escapeHtml(headerFields[i].value)}</td>`;
+                if (i + 1 < headerFields.length) {
+                    html += `<td class="hl">${escapeHtml(headerFields[i + 1].label)}</td><td>${escapeHtml(headerFields[i + 1].value)}</td>`;
+                } else {
+                    html += '<td></td><td></td>';
+                }
+                html += '</tr>';
+            }
+            html += '</tbody></table>';
+        }
         html += `<p class="meta">${data.length} rows &mdash; ${new Date().toLocaleDateString()}</p>`;
         html += '<table><thead><tr>';
         cols.forEach(c => { html += `<th>${escapeHtml(c.label)}</th>`; });
