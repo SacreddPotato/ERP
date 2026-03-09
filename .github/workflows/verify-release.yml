@@ -20,24 +20,23 @@ jobs:
       - name: Get latest release info
         id: release
         run: |
-          RELEASE=$(curl -s -H "Accept: application/vnd.github+json" \
+          curl -s -H "Accept: application/vnd.github+json" \
             -H "Authorization: Bearer ${{ github.token }}" \
-            "https://api.github.com/repos/${{ github.repository }}/releases/latest")
+            "https://api.github.com/repos/${{ github.repository }}/releases/latest" > /tmp/release.json
 
-          TAG=$(echo "$RELEASE" | jq -r '.tag_name')
+          TAG=$(jq -r '.tag_name' /tmp/release.json)
           VERSION=${TAG#v}
-          ASSET_COUNT=$(echo "$RELEASE" | jq '.assets | length')
+          ASSET_COUNT=$(jq '.assets | length' /tmp/release.json)
 
           echo "tag=$TAG" >> $GITHUB_OUTPUT
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "asset_count=$ASSET_COUNT" >> $GITHUB_OUTPUT
-          echo "release=$RELEASE" >> $GITHUB_OUTPUT
 
           echo "Latest release: $TAG ($ASSET_COUNT assets)"
 
       - name: Verify NSIS setup.exe exists
         run: |
-          ASSET=$(echo '${{ steps.release.outputs.release }}' | jq -r '.assets[] | select(.name | endswith("-setup.exe")) | .name')
+          ASSET=$(jq -r '.assets[] | select(.name | endswith("-setup.exe")) | .name' /tmp/release.json)
           if [ -z "$ASSET" ]; then
             echo "::error::Missing setup.exe in release ${{ steps.release.outputs.tag }}"
             exit 1
@@ -46,7 +45,7 @@ jobs:
 
       - name: Verify latest.yml exists
         run: |
-          ASSET=$(echo '${{ steps.release.outputs.release }}' | jq -r '.assets[] | select(.name == "latest.yml") | .name')
+          ASSET=$(jq -r '.assets[] | select(.name == "latest.yml") | .name' /tmp/release.json)
           if [ -z "$ASSET" ]; then
             echo "::error::Missing latest.yml in release ${{ steps.release.outputs.tag }} — electron-updater will not work"
             exit 1
@@ -55,7 +54,7 @@ jobs:
 
       - name: Verify blockmap exists
         run: |
-          ASSET=$(echo '${{ steps.release.outputs.release }}' | jq -r '.assets[] | select(.name | endswith(".blockmap")) | .name')
+          ASSET=$(jq -r '.assets[] | select(.name | endswith(".blockmap")) | .name' /tmp/release.json)
           if [ -z "$ASSET" ]; then
             echo "::warning::Missing blockmap in release ${{ steps.release.outputs.tag }} — delta updates will not work"
           else
@@ -64,7 +63,7 @@ jobs:
 
       - name: Download and validate latest.yml
         run: |
-          URL=$(echo '${{ steps.release.outputs.release }}' | jq -r '.assets[] | select(.name == "latest.yml") | .browser_download_url')
+          URL=$(jq -r '.assets[] | select(.name == "latest.yml") | .browser_download_url' /tmp/release.json)
           curl -sL "$URL" -o latest.yml
 
           echo "--- latest.yml contents ---"
