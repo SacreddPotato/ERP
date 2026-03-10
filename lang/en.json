@@ -228,6 +228,7 @@
     "pagination_showing": "Showing :from–:to of :total",
     "pagination_page": "page",
     "no_transactions": "No transactions recorded yet.",
+    "transactions_count": "transactions",
     "showing_transactions": "Showing :count transactions",
 
     "btn_update": "Update",

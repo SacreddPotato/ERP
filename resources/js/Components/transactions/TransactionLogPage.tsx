@@ -166,6 +166,7 @@ export default function TransactionLogPage() {
                         date_to: dateTo || undefined,
                         trans_date_from: transDateFrom || undefined,
                         trans_date_to: transDateTo || undefined,
+                        document_number: filterDocNumber || undefined,
                     },
                 }));
             } else {
@@ -727,6 +728,7 @@ export default function TransactionLogPage() {
                                 date_to: dateTo || undefined,
                                 trans_date_from: transDateFrom || undefined,
                                 trans_date_to: transDateTo || undefined,
+                                document_number: filterDocNumber || undefined,
                             },
                         }));
                     } else {

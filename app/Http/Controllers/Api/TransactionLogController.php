@@ -33,8 +33,13 @@ class TransactionLogController extends Controller
             $query->where(function ($q) use ($keyword) {
                 $q->where('entity_code', 'like', "%{$keyword}%")
                   ->orWhere('entity_name', 'like', "%{$keyword}%")
-                  ->orWhere('statement', 'like', "%{$keyword}%");
+                  ->orWhere('statement', 'like', "%{$keyword}%")
+                  ->orWhere('document_number', 'like', "%{$keyword}%")
+                  ->orWhere('payment_method', 'like', "%{$keyword}%");
             });
+        }
+        if ($request->filled('document_number')) {
+            $query->where('document_number', 'like', '%' . $request->input('document_number') . '%');
         }
         if ($request->filled('ledger_type')) {
             $query->where('ledger_type', $request->input('ledger_type'));
