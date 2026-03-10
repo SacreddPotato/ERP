@@ -91,7 +91,7 @@ export default function TreasuryPage() {
                 const firstMatch = matchCodes[0];
                 setTxLoading(true);
                 try {
-                    const txRes = await api.get('/api/ledger/treasury/transactions', { params: { code: firstMatch, date_from: dateFrom || undefined, date_to: dateTo || undefined } });
+                    const txRes = await api.get('/api/ledger/treasury/transactions', { params: { code: firstMatch, date_from: dateFrom || undefined, date_to: dateTo || undefined, search: search || undefined } });
                     setTransactions(txRes.data);
                     setExpandedCode(firstMatch);
                     setTxSortBy('transaction_date');
@@ -175,7 +175,7 @@ export default function TreasuryPage() {
         if (expandedCode === code) { setExpandedCode(null); return; }
         setTxLoading(true);
         try {
-            const res = await api.get('/api/ledger/treasury/transactions', { params: { code, date_from: dateFrom || undefined, date_to: dateTo || undefined } });
+            const res = await api.get('/api/ledger/treasury/transactions', { params: { code, date_from: dateFrom || undefined, date_to: dateTo || undefined, search: search || undefined } });
             setTransactions(res.data);
             setExpandedCode(code);
             setTxSortBy('transaction_date');

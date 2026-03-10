@@ -291,39 +291,231 @@ export default function TransactionLogPage() {
             .trim() || '-';
     };
 
-    const exportColumns: ColumnDef[] = [
-        { key: 'logged_at', label: t('th_logged_at'), render: (v) => fmtDateTime(v) },
-        { key: 'transaction_date', label: t('th_trans_date'), render: (v) => fmtDate(v) },
-        { key: 'category', label: t('th_module') },
-        { key: 'action', label: t('th_action') },
-        { key: 'code', label: t('th_code') },
-        { key: 'name', label: t('th_name') },
-        {
-            key: '_change',
-            label: t('th_change'),
-            summable: true,
-            render: (_v: any, row: any) => {
-                if (!row.source) {
-                    // Sum row
-                    const v = Number(_v) || 0;
-                    return v === 0 ? '-' : fmtNum(v);
-                }
-                if (row.source === 'stock') {
-                    const qty = Number(row.quantity) || 0;
-                    return qty === 0 ? '-' : fmtInt(qty);
-                }
-                const d = Number(row.debit) || 0;
-                const c = Number(row.credit) || 0;
-                if (d === 0 && c === 0) return '-';
-                const parts: string[] = [];
-                if (d > 0) parts.push(fmtNum(d));
-                if (c > 0) parts.push(fmtNum(c));
-                return parts.join(' / ');
+    const getExportColumns = (): ColumnDef[] => {
+        const common: ColumnDef[] = [
+            { key: 'logged_at', label: t('th_logged_at'), render: (v) => fmtDateTime(v) },
+            { key: 'transaction_date', label: t('th_trans_date'), render: (v) => fmtDate(v) },
+        ];
+
+        if (category === 'stock') {
+            return [
+                ...common,
+                { key: 'action', label: t('th_action') },
+                { key: 'code', label: t('th_code') },
+                { key: 'name', label: t('th_name') },
+                { key: 'factory', label: t('th_factory') },
+                { key: 'quantity', label: t('th_quantity'), render: (v) => v != null ? fmtInt(v) : '-', summable: true },
+                { key: 'new_value', label: t('th_stock'), render: (v) => fmtInt(v), summable: true },
+                { key: 'detail', label: t('th_detail'), render: (v: any) => cleanDetail(v) },
+            ];
+        }
+
+        if (category !== 'all') {
+            return [
+                ...common,
+                { key: 'action', label: t('th_action') },
+                { key: 'code', label: t('th_code') },
+                { key: 'name', label: t('th_name') },
+                { key: 'document_number', label: t('th_document_number'), render: (v) => v || '-' },
+                { key: 'payment_method', label: t('th_payment_method'), render: (v) => v || '-' },
+                { key: 'debit', label: t('th_debit'), render: (v) => { const n = Number(v) || 0; return n > 0 ? fmtNum(n) : '-'; }, summable: true },
+                { key: 'credit', label: t('th_credit'), render: (v) => { const n = Number(v) || 0; return n > 0 ? fmtNum(n) : '-'; }, summable: true },
+                { key: 'prev_value', label: t('th_previous_balance'), render: (v) => fmtNum(v), summable: true },
+                { key: 'new_value', label: t('th_balance'), render: (v) => fmtNum(v), summable: true },
+                { key: 'detail', label: t('th_detail'), render: (v: any) => cleanDetail(v) },
+            ];
+        }
+
+        // "all" view
+        return [
+            ...common,
+            { key: 'category', label: t('th_module') },
+            { key: 'action', label: t('th_action') },
+            { key: 'code', label: t('th_code') },
+            { key: 'name', label: t('th_name') },
+            {
+                key: '_change',
+                label: t('th_change'),
+                summable: true,
+                render: (_v: any, row: any) => {
+                    if (!row.source) {
+                        const v = Number(_v) || 0;
+                        return v === 0 ? '-' : fmtNum(v);
+                    }
+                    if (row.source === 'stock') {
+                        const qty = Number(row.quantity) || 0;
+                        return qty === 0 ? '-' : fmtInt(qty);
+                    }
+                    const d = Number(row.debit) || 0;
+                    const c = Number(row.credit) || 0;
+                    if (d === 0 && c === 0) return '-';
+                    const parts: string[] = [];
+                    if (d > 0) parts.push(fmtNum(d));
+                    if (c > 0) parts.push(fmtNum(c));
+                    return parts.join(' / ');
+                },
             },
-        },
-        { key: 'new_value', label: t('th_balance'), render: (v) => fmtNum(v), summable: true },
-        { key: 'detail', label: t('th_detail'), render: (v: any) => cleanDetail(v) },
-    ];
+            { key: 'new_value', label: t('th_balance'), render: (v) => fmtNum(v), summable: true },
+            { key: 'detail', label: t('th_detail'), render: (v: any) => cleanDetail(v) },
+        ];
+    };
+
+    const exportColumns = getExportColumns();
+
+    interface TableColumn {
+        key: string;
+        label: string;
+        sortable: boolean;
+    }
+
+    const getTableColumns = (): TableColumn[] => {
+        const common: TableColumn[] = [
+            { key: 'logged_at', label: t('th_logged_at'), sortable: true },
+            { key: 'transaction_date', label: t('th_trans_date'), sortable: true },
+        ];
+
+        if (category === 'stock') {
+            return [
+                ...common,
+                { key: 'action', label: t('th_action'), sortable: true },
+                { key: 'code', label: t('th_code'), sortable: true },
+                { key: 'name', label: t('th_name'), sortable: true },
+                { key: 'factory', label: t('th_factory'), sortable: true },
+                { key: 'quantity', label: t('th_quantity'), sortable: true },
+                { key: 'new_value', label: t('th_stock'), sortable: true },
+                { key: 'detail', label: t('th_detail'), sortable: false },
+                { key: '_actions', label: t('th_actions'), sortable: false },
+            ];
+        }
+
+        if (category !== 'all') {
+            // Ledger-specific view
+            return [
+                ...common,
+                { key: 'action', label: t('th_action'), sortable: true },
+                { key: 'code', label: t('th_code'), sortable: true },
+                { key: 'name', label: t('th_name'), sortable: true },
+                { key: 'document_number', label: t('th_document_number'), sortable: true },
+                { key: 'payment_method', label: t('th_payment_method'), sortable: true },
+                { key: 'debit', label: t('th_debit'), sortable: true },
+                { key: 'credit', label: t('th_credit'), sortable: true },
+                { key: 'prev_value', label: t('th_previous_balance'), sortable: true },
+                { key: 'new_value', label: t('th_balance'), sortable: true },
+                { key: 'detail', label: t('th_detail'), sortable: false },
+                { key: '_actions', label: t('th_actions'), sortable: false },
+            ];
+        }
+
+        // "all" view
+        return [
+            ...common,
+            { key: 'category', label: t('th_module'), sortable: true },
+            { key: 'action', label: t('th_action'), sortable: true },
+            { key: 'code', label: t('th_code'), sortable: true },
+            { key: 'name', label: t('th_name'), sortable: true },
+            { key: '_change', label: t('th_change'), sortable: false },
+            { key: 'new_value', label: t('th_balance'), sortable: true },
+            { key: 'detail', label: t('th_detail'), sortable: false },
+            { key: '_actions', label: t('th_actions'), sortable: false },
+        ];
+    };
+
+    const tableColumns = getTableColumns();
+
+    const renderCell = (log: UnifiedLog, col: TableColumn): React.ReactNode => {
+        const colors = CATEGORY_COLORS[log.category] || CATEGORY_COLORS.stock;
+        switch (col.key) {
+            case 'logged_at':
+                return <td key={col.key} className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400 whitespace-nowrap">{fmtDateTime(log.logged_at)}</td>;
+            case 'transaction_date':
+                return <td key={col.key} className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400 whitespace-nowrap">{fmtDate(log.transaction_date)}</td>;
+            case 'category':
+                return (
+                    <td key={col.key} className="px-4 py-3">
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium ${colors.bg} ${colors.text}`}>
+                            {getCategoryLabel(log.category)}
+                        </span>
+                    </td>
+                );
+            case 'action':
+                return (
+                    <td key={col.key} className="px-4 py-3">
+                        <span className={`inline-flex items-center gap-1 ${log.is_reversed ? 'line-through' : ''}`}>
+                            <Badge>{log.action}</Badge>
+                            {log.is_reversed && (
+                                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400">
+                                    {t('reversed_label')}
+                                </span>
+                            )}
+                        </span>
+                    </td>
+                );
+            case 'code':
+                return <td key={col.key} className="px-4 py-3 text-sm font-medium text-indigo-600 dark:text-indigo-400">{log.code}</td>;
+            case 'name':
+                return <td key={col.key} className={`px-4 py-3 text-sm text-slate-900 dark:text-slate-100 ${log.is_reversed ? 'line-through' : ''}`}>{log.name}</td>;
+            case '_change':
+                return <td key={col.key} className="px-4 py-3 text-sm">{formatChange(log)}</td>;
+            case 'new_value':
+                return <td key={col.key} className="px-4 py-3 text-sm font-bold dark:text-slate-100 tabular-nums">{formatBalance(log)}</td>;
+            case 'prev_value':
+                return <td key={col.key} className="px-4 py-3 text-sm dark:text-slate-100 tabular-nums">{fmtNum(log.prev_value)}</td>;
+            case 'detail':
+                return <td key={col.key} className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400 max-w-[180px] truncate" title={cleanDetail(log.detail)}>{cleanDetail(log.detail)}</td>;
+            case 'document_number':
+                return <td key={col.key} className="px-4 py-3 text-sm text-slate-700 dark:text-slate-300">{log.document_number || '-'}</td>;
+            case 'payment_method':
+                return <td key={col.key} className="px-4 py-3 text-sm text-slate-700 dark:text-slate-300">{log.payment_method || '-'}</td>;
+            case 'debit':
+                return (
+                    <td key={col.key} className="px-4 py-3 text-sm tabular-nums">
+                        {(log.debit ?? 0) > 0
+                            ? <span className="text-emerald-600 font-medium">{fmtNum(log.debit!)}</span>
+                            : <span className="text-slate-400">-</span>
+                        }
+                    </td>
+                );
+            case 'credit':
+                return (
+                    <td key={col.key} className="px-4 py-3 text-sm tabular-nums">
+                        {(log.credit ?? 0) > 0
+                            ? <span className="text-red-500 font-medium">{fmtNum(log.credit!)}</span>
+                            : <span className="text-slate-400">-</span>
+                        }
+                    </td>
+                );
+            case 'factory':
+                return <td key={col.key} className="px-4 py-3 text-sm text-slate-700 dark:text-slate-300">{log.factory || '-'}</td>;
+            case 'quantity':
+                return (
+                    <td key={col.key} className="px-4 py-3 text-sm tabular-nums">
+                        {log.quantity != null
+                            ? <span className="font-medium">{fmtInt(log.quantity)}</span>
+                            : <span className="text-slate-400">-</span>
+                        }
+                    </td>
+                );
+            case '_actions':
+                return (
+                    <td key={col.key} className="px-4 py-3">
+                        {!log.is_reversed ? (
+                            <Button
+                                size="xs"
+                                variant="ghost"
+                                onClick={() => setReverseTarget({ id: log.id, source: log.source })}
+                                className="text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-900/20"
+                            >
+                                {t('btn_reverse')}
+                            </Button>
+                        ) : (
+                            <span className="text-xs text-slate-400 dark:text-slate-600 italic">{t('reversed_label')}</span>
+                        )}
+                    </td>
+                );
+            default:
+                return <td key={col.key} className="px-4 py-3 text-sm text-slate-700 dark:text-slate-300">{(log as any)[col.key] ?? '-'}</td>;
+        }
+    };
 
     const showFactoryFilter = category === 'all' || category === 'stock';
 
@@ -441,69 +633,33 @@ export default function TransactionLogPage() {
                     <table className="w-full">
                         <thead className="border-b border-slate-200 dark:border-slate-700">
                             <tr>
-                                <SortHeader col="logged_at">{t('th_logged_at')}</SortHeader>
-                                <SortHeader col="transaction_date">{t('th_trans_date')}</SortHeader>
-                                <SortHeader col="category">{t('th_module')}</SortHeader>
-                                <SortHeader col="action">{t('th_action')}</SortHeader>
-                                <SortHeader col="code">{t('th_code')}</SortHeader>
-                                <SortHeader col="name">{t('th_name')}</SortHeader>
-                                <th className="px-4 py-3.5 text-start text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">{t('th_change')}</th>
-                                <SortHeader col="new_value">{t('th_balance')}</SortHeader>
-                                <th className="px-4 py-3.5 text-start text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider max-w-[180px]">{t('th_detail')}</th>
-                                <th className="px-4 py-3.5 text-start text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">{t('th_actions')}</th>
+                                {tableColumns.map((col) =>
+                                    col.sortable ? (
+                                        <SortHeader key={col.key} col={col.key}>{col.label}</SortHeader>
+                                    ) : (
+                                        <th
+                                            key={col.key}
+                                            className={`px-4 py-3.5 text-start text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider${col.key === 'detail' ? ' max-w-[180px]' : ''}`}
+                                        >
+                                            {col.label}
+                                        </th>
+                                    )
+                                )}
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
-                            {filteredLogs.map((log) => {
-                                const colors = CATEGORY_COLORS[log.category] || CATEGORY_COLORS.stock;
-                                return (
-                                    <tr
-                                        key={`${log.source}-${log.id}`}
-                                        className={`transition-colors ${
-                                            log.is_reversed
-                                                ? 'opacity-50'
-                                                : 'hover:bg-slate-50/50 dark:hover:bg-slate-700/50'
-                                        }`}
-                                    >
-                                        <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400 whitespace-nowrap">{fmtDateTime(log.logged_at)}</td>
-                                        <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400 whitespace-nowrap">{fmtDate(log.transaction_date)}</td>
-                                        <td className="px-4 py-3">
-                                            <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium ${colors.bg} ${colors.text}`}>
-                                                {getCategoryLabel(log.category)}
-                                            </span>
-                                        </td>
-                                        <td className="px-4 py-3">
-                                            <span className={`inline-flex items-center gap-1 ${log.is_reversed ? 'line-through' : ''}`}>
-                                                <Badge>{log.action}</Badge>
-                                                {log.is_reversed && (
-                                                    <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400">
-                                                        {t('reversed_label')}
-                                                    </span>
-                                                )}
-                                            </span>
-                                        </td>
-                                        <td className="px-4 py-3 text-sm font-medium text-indigo-600 dark:text-indigo-400">{log.code}</td>
-                                        <td className={`px-4 py-3 text-sm text-slate-900 dark:text-slate-100 ${log.is_reversed ? 'line-through' : ''}`}>{log.name}</td>
-                                        <td className="px-4 py-3 text-sm">{formatChange(log)}</td>
-                                        <td className="px-4 py-3 text-sm font-bold dark:text-slate-100 tabular-nums">{formatBalance(log)}</td>
-                                        <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400 max-w-[180px] truncate" title={cleanDetail(log.detail)}>{cleanDetail(log.detail)}</td>
-                                        <td className="px-4 py-3">
-                                            {!log.is_reversed ? (
-                                                <Button
-                                                    size="xs"
-                                                    variant="ghost"
-                                                    onClick={() => setReverseTarget({ id: log.id, source: log.source })}
-                                                    className="text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-900/20"
-                                                >
-                                                    {t('btn_reverse')}
-                                                </Button>
-                                            ) : (
-                                                <span className="text-xs text-slate-400 dark:text-slate-600 italic">{t('reversed_label')}</span>
-                                            )}
-                                        </td>
-                                    </tr>
-                                );
-                            })}
+                            {filteredLogs.map((log) => (
+                                <tr
+                                    key={`${log.source}-${log.id}`}
+                                    className={`transition-colors ${
+                                        log.is_reversed
+                                            ? 'opacity-50'
+                                            : 'hover:bg-slate-50/50 dark:hover:bg-slate-700/50'
+                                    }`}
+                                >
+                                    {tableColumns.map((col) => renderCell(log, col))}
+                                </tr>
+                            ))}
                         </tbody>
                     </table>
                     {filteredLogs.length === 0 && (
