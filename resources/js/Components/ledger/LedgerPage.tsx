@@ -104,7 +104,7 @@ export default function LedgerPage({ type }: LedgerPageProps) {
     const fetchData = useCallback(async () => {
         setLoading(true);
         try {
-            const res = await api.get(`/api/ledger/${type}`, { params: { search, page, per_page: pageSize, date_from: dateFrom || undefined, date_to: dateTo || undefined } });
+            const res = await api.get(`/api/ledger/${type}`, { params: { search, tx_search: txSearch || undefined, page, per_page: pageSize, date_from: dateFrom || undefined, date_to: dateTo || undefined } });
             const ledgerRes = res;
             setEntities(ledgerRes.data.entities);
             setTotals(ledgerRes.data.totals);
@@ -116,7 +116,6 @@ export default function LedgerPage({ type }: LedgerPageProps) {
             if (matchCodes.length > 0) {
                 const firstMatch = matchCodes[0];
                 setTxLoading(true);
-                setTxSearch(search);
                 try {
                     const txRes = await api.get(`/api/ledger/${type}/transactions`, { params: { code: firstMatch, date_from: dateFrom || undefined, date_to: dateTo || undefined } });
                     setTransactions(txRes.data);
@@ -125,13 +124,12 @@ export default function LedgerPage({ type }: LedgerPageProps) {
                     setTxSortDir('desc');
                 } catch {}
                 setTxLoading(false);
-            } else if (search) {
-                // Collapse if no tx matches when searching
+            } else if (txSearch) {
                 setExpandedCode(null);
             }
         } catch { toast(t('sync_failed'), 'error'); }
         setLoading(false);
-    }, [type, search, page, pageSize, dateFrom, dateTo, t]);
+    }, [type, search, txSearch, page, pageSize, dateFrom, dateTo, t]);
 
     useEffect(() => { fetchData(); }, [fetchData]);
 
@@ -191,7 +189,6 @@ export default function LedgerPage({ type }: LedgerPageProps) {
             setExpandedCode(null);
             return;
         }
-        setTxSearch('');
         setTxLoading(true);
         try {
             const res = await api.get(`/api/ledger/${type}/transactions`, { params: { code: entityCode, date_from: dateFrom || undefined, date_to: dateTo || undefined } });
@@ -405,8 +402,11 @@ export default function LedgerPage({ type }: LedgerPageProps) {
                         <div className="w-36">
                             <DatePickerInput value={dateTo} onChange={(v) => { setDateTo(v); setPage(1); }} placeholder={t('filter_date_to_label')} />
                         </div>
-                        <div className="w-64">
+                        <div className="w-48">
                             <Input placeholder={t('placeholder_search')} value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }} />
+                        </div>
+                        <div className="w-48">
+                            <Input placeholder={t('placeholder_search_transactions')} value={txSearch} onChange={(e) => { setTxSearch(e.target.value); setPage(1); }} />
                         </div>
                     </div>
                 </div>
@@ -502,16 +502,7 @@ export default function LedgerPage({ type }: LedgerPageProps) {
                                                                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                                                                 </svg>
                                                             </div>
-                                                        ) : (<>
-                                                            <div className="px-3 py-2 bg-slate-50/80 dark:bg-slate-700/50 border-b border-slate-200 dark:border-slate-600">
-                                                                <input
-                                                                    type="text"
-                                                                    value={txSearch}
-                                                                    onChange={e => setTxSearch(e.target.value)}
-                                                                    placeholder={t('placeholder_search_transactions')}
-                                                                    className="w-full max-w-xs px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-indigo-400"
-                                                                />
-                                                            </div>
+                                                        ) : (
                                                             <table className="w-full">
                                                                 <thead>
                                                                     <tr className="bg-slate-100/80 dark:bg-slate-700/80 border-b border-slate-200 dark:border-slate-600">
@@ -551,7 +542,7 @@ export default function LedgerPage({ type }: LedgerPageProps) {
                                                                     )}
                                                                 </tbody>
                                                             </table>
-                                                        </>)}
+                                                        )}
                                                         {!txLoading && sortedTransactions.length > 0 && (
                                                             <div className="px-3 py-2 border-t border-slate-200 dark:border-slate-600 flex items-center justify-between bg-slate-50/50 dark:bg-slate-700/30">
                                                                 <span className="text-xs text-slate-500 dark:text-slate-400">{sortedTransactions.length} {t('transactions_count')}</span>

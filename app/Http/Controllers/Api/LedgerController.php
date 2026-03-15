@@ -21,19 +21,25 @@ class LedgerController extends Controller
         $totals = $this->service->getTotalBalance($ledgerType);
 
         $txMatchCodes = [];
-        if ($request->filled('search')) {
-            $txMatchCodes = $this->service->getEntityCodesWithMatchingTransactions($ledgerType, $request->input('search'));
+        $txSearchTerm = $request->input('tx_search');
+        if ($txSearchTerm) {
+            $txMatchCodes = $this->service->getEntityCodesWithMatchingTransactions($ledgerType, $txSearchTerm);
+            $column = $ledgerType->codeColumn();
 
-            // Include entities that have matching transactions but weren't found by entity search
-            if (!empty($txMatchCodes)) {
-                $column = $ledgerType->codeColumn();
-                $existingCodes = $result['data']->pluck($column)->toArray();
-                $missingCodes = array_diff($txMatchCodes, $existingCodes);
-                if (!empty($missingCodes)) {
+            if ($request->filled('search')) {
+                // Both active — intersect: entity must match name AND have matching transactions
+                $result['data'] = $result['data']->filter(fn ($e) => in_array($e->{$column}, $txMatchCodes));
+                $result['total'] = $result['data']->count();
+                $result['data'] = $result['data']->values();
+            } else {
+                // No entity search — filter to only entities with matching transactions
+                if (!empty($txMatchCodes)) {
                     $model = $ledgerType->modelClass();
-                    $additional = $model::whereIn($column, $missingCodes)->orderBy($column)->get();
-                    $result['data'] = $result['data']->merge($additional)->sortBy($column)->values();
-                    $result['total'] += count($missingCodes);
+                    $result['data'] = $model::whereIn($column, $txMatchCodes)->orderBy($column)->get();
+                    $result['total'] = count($txMatchCodes);
+                } else {
+                    $result['data'] = collect();
+                    $result['total'] = 0;
                 }
             }
         }
