@@ -164,6 +164,7 @@
     "filter_statement": "Statement",
 
     "placeholder_search": "ID or name...",
+    "placeholder_search_transactions": "Search transactions...",
     "placeholder_threshold": "Threshold",
     "placeholder_item_id": "e.g., ITEM-001",
     "placeholder_item_name": "Enter item name",

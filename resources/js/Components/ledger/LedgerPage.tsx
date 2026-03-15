@@ -87,6 +87,7 @@ export default function LedgerPage({ type }: LedgerPageProps) {
 
     // Transaction document_number match codes (for auto-expand + highlight)
     const [txMatchCodes, setTxMatchCodes] = useState<string[]>([]);
+    const [txSearch, setTxSearch] = useState('');
 
     // Ref for scrolling to entry form
     const entryFormRef = useRef<HTMLDivElement>(null);
@@ -115,8 +116,9 @@ export default function LedgerPage({ type }: LedgerPageProps) {
             if (matchCodes.length > 0) {
                 const firstMatch = matchCodes[0];
                 setTxLoading(true);
+                setTxSearch(search);
                 try {
-                    const txRes = await api.get(`/api/ledger/${type}/transactions`, { params: { code: firstMatch, date_from: dateFrom || undefined, date_to: dateTo || undefined, search: search || undefined } });
+                    const txRes = await api.get(`/api/ledger/${type}/transactions`, { params: { code: firstMatch, date_from: dateFrom || undefined, date_to: dateTo || undefined } });
                     setTransactions(txRes.data);
                     setExpandedCode(firstMatch);
                     setTxSortBy('transaction_date');
@@ -189,6 +191,7 @@ export default function LedgerPage({ type }: LedgerPageProps) {
             setExpandedCode(null);
             return;
         }
+        setTxSearch('');
         setTxLoading(true);
         try {
             const res = await api.get(`/api/ledger/${type}/transactions`, { params: { code: entityCode, date_from: dateFrom || undefined, date_to: dateTo || undefined } });
@@ -205,11 +208,22 @@ export default function LedgerPage({ type }: LedgerPageProps) {
         else { setTxSortBy(col); setTxSortDir('desc'); }
     };
 
-    const sortedTransactions = [...transactions].sort((a, b) => {
+    const filteredTransactions = txSearch
+        ? transactions.filter(tx => {
+            const q = txSearch.toLowerCase();
+            return (tx.document_number?.toLowerCase().includes(q))
+                || (tx.payment_method?.toLowerCase().includes(q))
+                || (tx.statement?.toLowerCase().includes(q))
+                || (tx.transaction_type?.toLowerCase().includes(q))
+                || String(tx.debit).includes(q)
+                || String(tx.credit).includes(q);
+        })
+        : transactions;
+
+    const sortedTransactions = [...filteredTransactions].sort((a, b) => {
         const aVal = (a as any)[txSortBy];
         const bVal = (b as any)[txSortBy];
         if (aVal == null && bVal == null) {
-            // Secondary sort by logged_at desc
             const aLog = a.logged_at ?? '';
             const bLog = b.logged_at ?? '';
             return bLog.localeCompare(aLog);
@@ -221,7 +235,6 @@ export default function LedgerPage({ type }: LedgerPageProps) {
             : String(aVal).localeCompare(String(bVal));
         const primary = txSortDir === 'asc' ? cmp : -cmp;
         if (primary !== 0) return primary;
-        // Secondary sort: logged_at desc
         const aLog = a.logged_at ?? '';
         const bLog = b.logged_at ?? '';
         return bLog.localeCompare(aLog);
@@ -489,7 +502,16 @@ export default function LedgerPage({ type }: LedgerPageProps) {
                                                                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                                                                 </svg>
                                                             </div>
-                                                        ) : (
+                                                        ) : (<>
+                                                            <div className="px-3 py-2 bg-slate-50/80 dark:bg-slate-700/50 border-b border-slate-200 dark:border-slate-600">
+                                                                <input
+                                                                    type="text"
+                                                                    value={txSearch}
+                                                                    onChange={e => setTxSearch(e.target.value)}
+                                                                    placeholder={t('placeholder_search_transactions')}
+                                                                    className="w-full max-w-xs px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                                                                />
+                                                            </div>
                                                             <table className="w-full">
                                                                 <thead>
                                                                     <tr className="bg-slate-100/80 dark:bg-slate-700/80 border-b border-slate-200 dark:border-slate-600">
@@ -512,7 +534,7 @@ export default function LedgerPage({ type }: LedgerPageProps) {
                                                                             <td className="px-3 py-2.5 text-xs"><Badge>{tx.transaction_type}</Badge></td>
                                                                             <td className="px-3 py-2.5 text-xs text-slate-500 dark:text-slate-400 whitespace-nowrap">
                                                                                 {tx.document_number ? (
-                                                                                    search && tx.document_number.toLowerCase().includes(search.toLowerCase())
+                                                                                    txSearch && tx.document_number.toLowerCase().includes(txSearch.toLowerCase())
                                                                                         ? <span className="bg-yellow-200 dark:bg-yellow-700 px-1 rounded font-medium">{tx.document_number}</span>
                                                                                         : tx.document_number
                                                                                 ) : '-'}
@@ -529,7 +551,7 @@ export default function LedgerPage({ type }: LedgerPageProps) {
                                                                     )}
                                                                 </tbody>
                                                             </table>
-                                                        )}
+                                                        </>)}
                                                         {!txLoading && sortedTransactions.length > 0 && (
                                                             <div className="px-3 py-2 border-t border-slate-200 dark:border-slate-600 flex items-center justify-between bg-slate-50/50 dark:bg-slate-700/30">
                                                                 <span className="text-xs text-slate-500 dark:text-slate-400">{sortedTransactions.length} {t('transactions_count')}</span>

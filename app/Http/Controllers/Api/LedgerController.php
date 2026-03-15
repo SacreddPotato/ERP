@@ -106,7 +106,6 @@ class LedgerController extends Controller
             $ledgerType,
             $request->input('date_from'),
             $request->input('date_to'),
-            $request->input('search'),
         );
         return response()->json($transactions);
     }

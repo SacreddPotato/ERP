@@ -322,7 +322,7 @@ class LedgerService
         ];
     }
 
-    public function getEntityTransactions(string $code, LedgerType $type, ?string $dateFrom = null, ?string $dateTo = null, ?string $search = null): Collection
+    public function getEntityTransactions(string $code, LedgerType $type, ?string $dateFrom = null, ?string $dateTo = null): Collection
     {
         $logQuery = LedgerLog::where('entity_code', $code)
             ->where('ledger_type', $type->value);
@@ -336,10 +336,6 @@ class LedgerService
         if ($dateTo) {
             $logQuery->where('transaction_date', '<=', $dateTo);
             $txnQuery->where('transaction_date', '<=', $dateTo);
-        }
-        if ($search) {
-            $logQuery->where('document_number', 'like', "%{$search}%");
-            $txnQuery->where('document_number', 'like', "%{$search}%");
         }
 
         return $logQuery->get()->merge($txnQuery->get())
