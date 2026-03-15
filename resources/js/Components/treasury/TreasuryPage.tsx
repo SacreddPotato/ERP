@@ -175,7 +175,7 @@ export default function TreasuryPage() {
         if (expandedCode === code) { setExpandedCode(null); return; }
         setTxLoading(true);
         try {
-            const res = await api.get('/api/ledger/treasury/transactions', { params: { code, date_from: dateFrom || undefined, date_to: dateTo || undefined, search: search || undefined } });
+            const res = await api.get('/api/ledger/treasury/transactions', { params: { code, date_from: dateFrom || undefined, date_to: dateTo || undefined } });
             setTransactions(res.data);
             setExpandedCode(code);
             setTxSortBy('transaction_date');

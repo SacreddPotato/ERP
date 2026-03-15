@@ -191,7 +191,7 @@ export default function LedgerPage({ type }: LedgerPageProps) {
         }
         setTxLoading(true);
         try {
-            const res = await api.get(`/api/ledger/${type}/transactions`, { params: { code: entityCode, date_from: dateFrom || undefined, date_to: dateTo || undefined, search: search || undefined } });
+            const res = await api.get(`/api/ledger/${type}/transactions`, { params: { code: entityCode, date_from: dateFrom || undefined, date_to: dateTo || undefined } });
             setTransactions(res.data);
             setExpandedCode(entityCode);
             setTxSortBy('transaction_date');
