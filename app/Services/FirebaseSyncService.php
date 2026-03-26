@@ -50,7 +50,7 @@ class FirebaseSyncService
         $this->accessToken = $token['access_token'];
 
         $this->baseUrl = "https://firestore.googleapis.com/v1/projects/{$this->projectId}/databases/(default)/documents";
-        $this->http = new Client(['timeout' => 120]);
+        $this->http = new Client(['timeout' => 300]);
     }
 
     protected function headers(): array
@@ -354,7 +354,8 @@ class FirebaseSyncService
     {
         $stats = ['pushed' => 0, 'errors' => []];
         $lastPush = $this->getSyncTimestamp('last_push_at');
-        $now = now()->toIso8601String();
+        $now = now()->format('Y-m-d H:i:s');
+        $nowIso = now()->toIso8601String();
 
         $steps = ['stock', 'customers', 'suppliers', 'treasury', 'treasury_config', 'covenants', 'advances', 'stock_transactions', 'ledger_transactions', 'full_log', 'ledger_log'];
         $total = count($steps);
@@ -362,17 +363,17 @@ class FirebaseSyncService
         foreach ($steps as $i => $step) {
             try {
                 match ($step) {
-                    'stock' => $stats['pushed'] += $this->pushStock($lastPush, $now),
-                    'customers' => $stats['pushed'] += $this->pushLedgerEntities(LedgerType::Customer, $lastPush, $now),
-                    'suppliers' => $stats['pushed'] += $this->pushLedgerEntities(LedgerType::Supplier, $lastPush, $now),
-                    'treasury' => $stats['pushed'] += $this->pushLedgerEntities(LedgerType::Treasury, $lastPush, $now),
-                    'treasury_config' => $stats['pushed'] += $this->pushTreasuryConfig($now),
-                    'covenants' => $stats['pushed'] += $this->pushLedgerEntities(LedgerType::Covenant, $lastPush, $now),
-                    'advances' => $stats['pushed'] += $this->pushLedgerEntities(LedgerType::Advance, $lastPush, $now),
-                    'stock_transactions' => $stats['pushed'] += $this->pushStockTransactions($lastPush, $now),
-                    'ledger_transactions' => $stats['pushed'] += $this->pushLedgerTransactions($lastPush, $now),
-                    'full_log' => $stats['pushed'] += $this->pushTransactionLogs($lastPush, $now),
-                    'ledger_log' => $stats['pushed'] += $this->pushLedgerLogs($lastPush, $now),
+                    'stock' => $stats['pushed'] += $this->pushStock($lastPush, $nowIso),
+                    'customers' => $stats['pushed'] += $this->pushLedgerEntities(LedgerType::Customer, $lastPush, $nowIso),
+                    'suppliers' => $stats['pushed'] += $this->pushLedgerEntities(LedgerType::Supplier, $lastPush, $nowIso),
+                    'treasury' => $stats['pushed'] += $this->pushLedgerEntities(LedgerType::Treasury, $lastPush, $nowIso),
+                    'treasury_config' => $stats['pushed'] += $this->pushTreasuryConfig($nowIso),
+                    'covenants' => $stats['pushed'] += $this->pushLedgerEntities(LedgerType::Covenant, $lastPush, $nowIso),
+                    'advances' => $stats['pushed'] += $this->pushLedgerEntities(LedgerType::Advance, $lastPush, $nowIso),
+                    'stock_transactions' => $stats['pushed'] += $this->pushStockTransactions($lastPush, $nowIso),
+                    'ledger_transactions' => $stats['pushed'] += $this->pushLedgerTransactions($lastPush, $nowIso),
+                    'full_log' => $stats['pushed'] += $this->pushTransactionLogs($lastPush, $nowIso),
+                    'ledger_log' => $stats['pushed'] += $this->pushLedgerLogs($lastPush, $nowIso),
                 };
             } catch (\Throwable $e) {
                 $stats['errors'][] = "{$step}: {$e->getMessage()}";
@@ -384,6 +385,7 @@ class FirebaseSyncService
         }
 
         $this->setSyncTimestamp('last_push_at', $now);
+
 
         return $stats;
     }
@@ -472,12 +474,12 @@ class FirebaseSyncService
     {
         $query = StockTransaction::query();
         if ($since) {
-            $query->where('updated_at', '>', $since);
+            $query->where('logged_at', '>', $since);
         }
         return $this->pushTransactionCollection(
             $query->get(),
             'stock_transactions',
-            fn($t) => $t->logged_at->format('Y-m-d_H-i-s') . "_{$t->item_code}_{$t->factory}",
+            fn($t) => $t->logged_at->format('Y-m-d_H-i-s') . "_{$t->item_code}_{$t->factory}_{$t->id}",
             $now
         );
     }
@@ -488,7 +490,7 @@ class FirebaseSyncService
         foreach (LedgerType::cases() as $type) {
             $query = LedgerTransaction::where('ledger_type', $type->value);
             if ($since) {
-                $query->where('updated_at', '>', $since);
+                $query->where('logged_at', '>', $since);
             }
             $transactions = $query->get();
             $collectionName = "{$type->value}_transactions";
@@ -496,7 +498,7 @@ class FirebaseSyncService
             $count += $this->pushTransactionCollection(
                 $transactions,
                 $collectionName,
-                fn($t) => $t->logged_at->format('Y-m-d_H-i-s') . "_{$t->entity_code}",
+                fn($t) => $t->logged_at->format('Y-m-d_H-i-s') . "_{$t->entity_code}_{$t->id}",
                 $now
             );
         }
@@ -507,12 +509,12 @@ class FirebaseSyncService
     {
         $query = TransactionLog::query();
         if ($since) {
-            $query->where('updated_at', '>', $since);
+            $query->where('logged_at', '>', $since);
         }
         return $this->pushTransactionCollection(
             $query->get(),
             'full_transactions_log',
-            fn($t) => $t->logged_at->format('Y-m-d_H-i-s') . "_{$t->item_code}",
+            fn($t) => $t->logged_at->format('Y-m-d_H-i-s') . "_{$t->item_code}_{$t->id}",
             $now
         );
     }
@@ -521,12 +523,12 @@ class FirebaseSyncService
     {
         $query = LedgerLog::query();
         if ($since) {
-            $query->where('updated_at', '>', $since);
+            $query->where('logged_at', '>', $since);
         }
         return $this->pushTransactionCollection(
             $query->get(),
             'ledger_log',
-            fn($t) => $t->logged_at->format('Y-m-d_H-i-s') . "_{$t->entity_code}",
+            fn($t) => $t->logged_at->format('Y-m-d_H-i-s') . "_{$t->entity_code}_{$t->id}",
             $now
         );
     }
@@ -821,7 +823,7 @@ class FirebaseSyncService
             $result = $this->pullTransactionCollection(
                 "{$type->value}_transactions",
                 LedgerTransaction::class,
-                ['logged_at', 'entity_code'],
+                ['logged_at', 'entity_code', 'debit', 'credit'],
                 $skipExisting,
                 $since
             );
@@ -851,7 +853,7 @@ class FirebaseSyncService
         return $this->pullTransactionCollection(
             'ledger_log',
             LedgerLog::class,
-            ['logged_at', 'entity_code'],
+            ['logged_at', 'entity_code', 'debit', 'credit'],
             $skipExisting,
             $since
         );
@@ -925,6 +927,368 @@ class FirebaseSyncService
         }
 
         return compact('pulled', 'skipped', 'errors');
+    }
+
+    // ─── BULK SYNC (optimized for Firestore quota) ─────────────────
+    //
+    // Instead of one Firestore doc per record (~20k reads/writes),
+    // we pack records into chunked docs (~15-20 reads/writes total).
+    //
+    // Firestore limit: 1 MiB per doc. We use 800 records per chunk
+    // to stay safely under that limit with encoding overhead.
+
+    protected const BULK_CHUNK_SIZE = 800;
+
+    /**
+     * Bulk push: serialize all local data into chunked Firestore docs.
+     * Costs ~15-25 writes instead of ~20k.
+     */
+    public function bulkPush(?callable $onProgress = null): array
+    {
+        $stats = ['pushed' => 0, 'errors' => []];
+        $now = now()->toIso8601String();
+
+        $collections = $this->buildBulkCollections();
+        $total = array_sum(array_map(fn($chunks) => count($chunks), $collections)) + 1; // +1 for meta
+        $done = 0;
+
+        $meta = ['_lastUpdated' => $now, 'collections' => []];
+
+        foreach ($collections as $name => $chunks) {
+            $meta['collections'][$name] = count($chunks);
+
+            foreach ($chunks as $i => $chunk) {
+                $docKey = "{$name}_{$i}";
+                try {
+                    $this->setDocument("_bulk/{$docKey}", [
+                        '_lastUpdated' => $now,
+                        '_collection' => $name,
+                        '_chunk' => $i,
+                        '_count' => count($chunk),
+                        'records' => $chunk,
+                    ]);
+                    $stats['pushed'] += count($chunk);
+                } catch (\Throwable $e) {
+                    $stats['errors'][] = "bulk/{$docKey}: {$e->getMessage()}";
+                }
+
+                $done++;
+                if ($onProgress) {
+                    $onProgress(round($done / $total * 100), $docKey);
+                }
+            }
+        }
+
+        // Write meta doc
+        try {
+            $this->setDocument('_bulk/_meta', $meta);
+        } catch (\Throwable $e) {
+            $stats['errors'][] = "_bulk/_meta: {$e->getMessage()}";
+        }
+
+        $this->setSyncTimestamp('last_push_at', now()->format('Y-m-d H:i:s'));
+        $this->setSyncTimestamp('last_bulk_push_at', $now);
+
+        if ($onProgress) {
+            $onProgress(100, 'done');
+        }
+
+        return $stats;
+    }
+
+    /**
+     * Bulk pull: read chunked docs and hydrate local DB.
+     * Costs ~15-25 reads instead of ~20k.
+     */
+    public function bulkPull(?callable $onProgress = null): array
+    {
+        $stats = ['pulled' => 0, 'skipped' => 0, 'errors' => []];
+
+        // 1. Read meta doc (1 read)
+        $meta = $this->getDocument('_bulk/_meta');
+        if (!$meta || empty($meta['collections'])) {
+            $stats['errors'][] = 'No bulk data found on Firebase. Run a bulk push first.';
+            return $stats;
+        }
+
+        $collections = $meta['collections'];
+        $totalChunks = array_sum(array_map(fn($v) => is_numeric($v) ? (int) $v : 0, $collections));
+        $done = 0;
+
+        // 2. Download ALL chunks first, before truncating local data
+        $allChunks = [];
+        foreach ($collections as $name => $chunkCount) {
+            $chunkCount = (int) $chunkCount;
+            for ($i = 0; $i < $chunkCount; $i++) {
+                $docKey = "{$name}_{$i}";
+                try {
+                    $chunkData = $this->getDocument("_bulk/{$docKey}");
+                    if ($chunkData && !empty($chunkData['records']) && is_array($chunkData['records'])) {
+                        $allChunks[] = ['name' => $name, 'records' => $chunkData['records']];
+                    }
+                } catch (\Throwable $e) {
+                    $stats['errors'][] = "bulk/{$docKey}: {$e->getMessage()}";
+                }
+
+                $done++;
+                if ($onProgress) {
+                    $onProgress(round($done / ($totalChunks + 1) * 50), $docKey); // 0-50% for download
+                }
+            }
+        }
+
+        // 3. Only truncate AFTER all chunks downloaded successfully
+        DB::transaction(function () {
+            StockItem::truncate();
+            TransactionLog::truncate();
+            StockTransaction::truncate();
+            Customer::truncate();
+            Supplier::truncate();
+            TreasuryAccount::truncate();
+            TreasuryConfig::truncate();
+            Covenant::truncate();
+            Advance::truncate();
+            LedgerLog::truncate();
+            LedgerTransaction::truncate();
+        });
+
+        // 4. Import all downloaded chunks
+        $importDone = 0;
+        $importTotal = count($allChunks);
+        foreach ($allChunks as $chunk) {
+            $result = $this->importBulkRecords($chunk['name'], $chunk['records']);
+            $stats['pulled'] += $result['pulled'];
+            $stats['skipped'] += $result['skipped'];
+            if (!empty($result['errors'])) {
+                $stats['errors'] = array_merge($stats['errors'], $result['errors']);
+            }
+            $importDone++;
+            if ($onProgress) {
+                $onProgress(50 + round($importDone / $importTotal * 50), $chunk['name']); // 50-100%
+            }
+        }
+
+        // Auto-fix treasury config
+        if (TreasuryAccount::exists()) {
+            $config = TreasuryConfig::first();
+            if ($config && !$config->initialized) {
+                $config->update(['initialized' => true]);
+            } elseif (!$config) {
+                TreasuryConfig::create(['initialized' => true, 'starting_capital' => 0, 'currency' => 'EGP']);
+            }
+        }
+
+        $this->clearSyncTimestamps();
+        $this->setSyncTimestamp('last_pull_at', now()->toIso8601String());
+
+        if ($onProgress) {
+            $onProgress(100, 'done');
+        }
+
+        return $stats;
+    }
+
+    /**
+     * Build all collections as arrays of plain data, chunked.
+     */
+    protected function buildBulkCollections(): array
+    {
+        $collections = [];
+
+        // Stock items (per factory)
+        $stockRecords = [];
+        foreach (Factory::cases() as $factory) {
+            foreach (StockItem::forFactory($factory->value)->get() as $item) {
+                $data = $this->stockItemToFirestore($item);
+                $data['factory'] = $factory->value;
+                $stockRecords[] = $data;
+            }
+        }
+        $collections['stock'] = array_chunk($stockRecords, self::BULK_CHUNK_SIZE);
+        if (empty($collections['stock'])) $collections['stock'] = [[]];
+
+        // Ledger entities
+        foreach (LedgerType::cases() as $type) {
+            $name = $this->firestoreLedgerName($type);
+            $model = $type->modelClass();
+            $records = [];
+            foreach ($model::all() as $entity) {
+                $data = $entity->toArray();
+                unset($data['id'], $data['created_at'], $data['updated_at']);
+                $records[] = $this->stringifyValues($data);
+            }
+            $collections[$name] = array_chunk($records, self::BULK_CHUNK_SIZE);
+            if (empty($collections[$name])) $collections[$name] = [[]];
+        }
+
+        // Treasury config
+        $config = TreasuryConfig::current();
+        if ($config) {
+            $data = $config->toArray();
+            unset($data['id'], $data['created_at'], $data['updated_at']);
+            $collections['treasury_config'] = [[$this->stringifyValues($data)]];
+        }
+
+        // Transaction collections
+        $txCollections = [
+            'stock_transactions' => [StockTransaction::class, null],
+            'full_transactions_log' => [TransactionLog::class, null],
+            'ledger_log' => [LedgerLog::class, null],
+        ];
+
+        foreach ($txCollections as $name => [$modelClass, $_]) {
+            $records = [];
+            foreach ($modelClass::all() as $record) {
+                $data = $record->toArray();
+                unset($data['id'], $data['created_at'], $data['updated_at']);
+                $records[] = $this->stringifyValues($data);
+            }
+            $collections[$name] = array_chunk($records, self::BULK_CHUNK_SIZE);
+            if (empty($collections[$name])) $collections[$name] = [[]];
+        }
+
+        // Ledger transactions (per type)
+        foreach (LedgerType::cases() as $type) {
+            $name = "{$type->value}_transactions";
+            $records = [];
+            foreach (LedgerTransaction::where('ledger_type', $type->value)->get() as $record) {
+                $data = $record->toArray();
+                unset($data['id'], $data['created_at'], $data['updated_at']);
+                $records[] = $this->stringifyValues($data);
+            }
+            $collections[$name] = array_chunk($records, self::BULK_CHUNK_SIZE);
+            if (empty($collections[$name])) $collections[$name] = [[]];
+        }
+
+        return $collections;
+    }
+
+    /**
+     * Import records from a bulk chunk into the correct model.
+     */
+    protected function importBulkRecords(string $collectionName, array $records): array
+    {
+        $pulled = 0;
+        $skipped = 0;
+        $errors = [];
+
+        foreach ($records as $rawData) {
+            if (!is_array($rawData)) { $skipped++; continue; }
+
+            try {
+                match (true) {
+                    $collectionName === 'stock' => $this->importStockRecord($rawData),
+                    $collectionName === 'treasury_config' => $this->importTreasuryConfigRecord($rawData),
+                    in_array($collectionName, ['customers', 'suppliers', 'treasury', 'covenant', 'advance']) =>
+                        $this->importLedgerEntityRecord($collectionName, $rawData),
+                    str_ends_with($collectionName, '_transactions') =>
+                        $this->importLedgerTransactionRecord($collectionName, $rawData),
+                    $collectionName === 'stock_transactions' =>
+                        $this->importStockTransactionRecord($rawData),
+                    $collectionName === 'full_transactions_log' =>
+                        $this->importTransactionLogRecord($rawData),
+                    $collectionName === 'ledger_log' =>
+                        $this->importLedgerLogRecord($rawData),
+                    default => throw new \RuntimeException("Unknown collection: {$collectionName}"),
+                };
+                $pulled++;
+            } catch (\Throwable $e) {
+                $errors[] = "{$collectionName}: {$e->getMessage()}";
+                $skipped++;
+            }
+        }
+
+        return compact('pulled', 'skipped', 'errors');
+    }
+
+    protected function importStockRecord(array $rawData): void
+    {
+        $rawData['item_code'] = $rawData['id'] ?? $rawData['item_code'] ?? '';
+        $rawData['factory'] = $rawData['factory'] ?? $rawData['location'] ?? '';
+        $data = $this->sanitizeForModel(StockItem::class, $rawData);
+        StockItem::create($data);
+    }
+
+    protected function importTreasuryConfigRecord(array $rawData): void
+    {
+        $data = $this->sanitizeForModel(TreasuryConfig::class, $rawData);
+        $existing = TreasuryConfig::first();
+        if ($existing) {
+            $existing->update($data);
+        } else {
+            TreasuryConfig::create($data);
+        }
+    }
+
+    protected function importLedgerEntityRecord(string $collectionName, array $rawData): void
+    {
+        $typeMap = [
+            'customers' => LedgerType::Customer,
+            'suppliers' => LedgerType::Supplier,
+            'treasury' => LedgerType::Treasury,
+            'covenant' => LedgerType::Covenant,
+            'advance' => LedgerType::Advance,
+        ];
+        $type = $typeMap[$collectionName] ?? null;
+        if (!$type) return;
+
+        $model = $type->modelClass();
+        $column = $type->codeColumn();
+        $rawData[$column] = $rawData[$column] ?? $rawData['id'] ?? '';
+        $data = $this->sanitizeForModel($model, $rawData);
+        $data[$column] = $rawData[$column];
+        $model::updateOrCreate([$column => $data[$column]], $data);
+    }
+
+    protected function importLedgerTransactionRecord(string $collectionName, array $rawData): void
+    {
+        if (isset($rawData['entity_id']) && !isset($rawData['entity_code'])) {
+            $rawData['entity_code'] = $rawData['entity_id'];
+        }
+        if (isset($rawData['timestamp']) && !isset($rawData['logged_at'])) {
+            $rawData['logged_at'] = $rawData['timestamp'];
+        }
+        $data = $this->sanitizeForModel(LedgerTransaction::class, $rawData);
+        LedgerTransaction::create($data);
+    }
+
+    protected function importStockTransactionRecord(array $rawData): void
+    {
+        $data = $this->sanitizeForModel(StockTransaction::class, $rawData);
+        StockTransaction::create($data);
+    }
+
+    protected function importTransactionLogRecord(array $rawData): void
+    {
+        $data = $this->sanitizeForModel(TransactionLog::class, $rawData);
+        TransactionLog::create($data);
+    }
+
+    protected function importLedgerLogRecord(array $rawData): void
+    {
+        if (isset($rawData['entity_id']) && !isset($rawData['entity_code'])) {
+            $rawData['entity_code'] = $rawData['entity_id'];
+        }
+        if (isset($rawData['timestamp']) && !isset($rawData['logged_at'])) {
+            $rawData['logged_at'] = $rawData['timestamp'];
+        }
+        $data = $this->sanitizeForModel(LedgerLog::class, $rawData);
+        LedgerLog::create($data);
+    }
+
+    /**
+     * Ensure all values are strings/numbers (no Carbon objects) for Firestore encoding.
+     */
+    protected function stringifyValues(array $data): array
+    {
+        foreach ($data as $key => $value) {
+            if ($value instanceof \DateTimeInterface) {
+                $data[$key] = $value->format('Y-m-d H:i:s');
+            } elseif ($value instanceof \BackedEnum) {
+                $data[$key] = $value->value;
+            }
+        }
+        return $data;
     }
 
     // ─── HELPERS ────────────────────────────────────────────────────
