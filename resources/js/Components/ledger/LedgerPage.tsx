@@ -599,14 +599,18 @@ export default function LedgerPage({ type }: LedgerPageProps) {
 
             {txExport && (() => {
                 const e = txExport.entity;
+                const txData = txExport.data;
+                const txDebit = txData.reduce((sum, tx) => sum + Number(tx.debit || 0), 0);
+                const txCredit = txData.reduce((sum, tx) => sum + Number(tx.credit || 0), 0);
+                const txBalance = Number(e.opening_balance || 0) + txDebit - txCredit;
                 const hf: HeaderField[] = [
                     { label: t('th_id'), value: txExport.code },
                     { label: t('th_name'), value: txExport.name },
                     ...(cfg.hasPhone && e.phone ? [{ label: t('th_phone'), value: e.phone }] : []),
                     { label: t('th_opening_balance'), value: fmtNum(e.opening_balance) },
-                    { label: t('th_debit'), value: fmtNum(e.debit) },
-                    { label: t('th_credit'), value: fmtNum(e.credit) },
-                    { label: t('th_balance'), value: fmtNum(e.balance) },
+                    { label: t('th_debit'), value: fmtNum(txDebit) },
+                    { label: t('th_credit'), value: fmtNum(txCredit) },
+                    { label: t('th_balance'), value: fmtNum(txBalance) },
                 ];
                 return (
                     <ExportPrintModal

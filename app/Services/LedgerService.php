@@ -305,9 +305,16 @@ class LedgerService
 
         $column = $type->codeColumn();
         $total = $query->count();
+        $totals = [
+            'total_balance' => (float) (clone $query)->sum('balance'),
+            'total_opening' => (float) (clone $query)->sum('opening_balance'),
+            'total_debit' => (float) (clone $query)->sum('debit'),
+            'total_credit' => (float) (clone $query)->sum('credit'),
+            'count' => $total,
+        ];
         $data = $query->orderBy($column)->skip(($page - 1) * $perPage)->take($perPage)->get();
 
-        return ['data' => $data, 'total' => $total];
+        return ['data' => $data, 'total' => $total, 'totals' => $totals];
     }
 
     public function getTotalBalance(LedgerType $type): array

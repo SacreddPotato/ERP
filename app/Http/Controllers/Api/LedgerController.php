@@ -18,13 +18,14 @@ class LedgerController extends Controller
         $perPage = (int) $request->input('per_page', 25);
         $page = (int) $request->input('page', 1);
         $result = $this->service->getAll($ledgerType, $request->only(['search', 'payment_method', 'document_number', 'statement', 'date_from', 'date_to']), $perPage, $page);
-        $totals = $this->service->getTotalBalance($ledgerType);
+        $totals = $result['totals'];
 
         $txMatchCodes = [];
         $txSearchTerm = $request->input('tx_search');
         if ($txSearchTerm) {
             $txMatchCodes = $this->service->getEntityCodesWithMatchingTransactions($ledgerType, $txSearchTerm);
             $column = $ledgerType->codeColumn();
+            $model = $ledgerType->modelClass();
 
             if ($request->filled('search')) {
                 // Both active — intersect: entity must match name AND have matching transactions
@@ -34,13 +35,29 @@ class LedgerController extends Controller
             } else {
                 // No entity search — filter to only entities with matching transactions
                 if (!empty($txMatchCodes)) {
-                    $model = $ledgerType->modelClass();
                     $result['data'] = $model::whereIn($column, $txMatchCodes)->orderBy($column)->get();
                     $result['total'] = count($txMatchCodes);
                 } else {
                     $result['data'] = collect();
                     $result['total'] = 0;
                 }
+            }
+
+            // Recompute totals from the full tx-filtered set
+            if (!empty($txMatchCodes)) {
+                $txQuery = $model::whereIn($column, $txMatchCodes);
+                if ($request->filled('search')) {
+                    $txQuery->search($request->input('search'));
+                }
+                $totals = [
+                    'total_balance' => (float) (clone $txQuery)->sum('balance'),
+                    'total_opening' => (float) (clone $txQuery)->sum('opening_balance'),
+                    'total_debit' => (float) (clone $txQuery)->sum('debit'),
+                    'total_credit' => (float) (clone $txQuery)->sum('credit'),
+                    'count' => (clone $txQuery)->count(),
+                ];
+            } else {
+                $totals = ['total_balance' => 0, 'total_opening' => 0, 'total_debit' => 0, 'total_credit' => 0, 'count' => 0];
             }
         }
 
