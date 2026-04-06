@@ -50,7 +50,10 @@ class FirebaseSyncService
         $this->accessToken = $token['access_token'];
 
         $this->baseUrl = "https://firestore.googleapis.com/v1/projects/{$this->projectId}/databases/(default)/documents";
-        $this->http = new Client(['timeout' => 300]);
+        $this->http = new Client([
+            'timeout' => 600,
+            'connect_timeout' => 30,
+        ]);
     }
 
     protected function headers(): array
@@ -949,34 +952,58 @@ class FirebaseSyncService
         $now = now()->toIso8601String();
 
         $collections = $this->buildBulkCollections();
-        $total = array_sum(array_map(fn($chunks) => count($chunks), $collections)) + 1; // +1 for meta
-        $done = 0;
-
         $meta = ['_lastUpdated' => $now, 'collections' => []];
 
+        // Build all requests upfront
+        $requests = [];
+        $chunkRecordCounts = [];
         foreach ($collections as $name => $chunks) {
             $meta['collections'][$name] = count($chunks);
-
             foreach ($chunks as $i => $chunk) {
                 $docKey = "{$name}_{$i}";
-                try {
-                    $this->setDocument("_bulk/{$docKey}", [
+                $requests[$docKey] = [
+                    'path' => "_bulk/{$docKey}",
+                    'data' => [
                         '_lastUpdated' => $now,
                         '_collection' => $name,
                         '_chunk' => $i,
                         '_count' => count($chunk),
                         'records' => $chunk,
-                    ]);
-                    $stats['pushed'] += count($chunk);
-                } catch (\Throwable $e) {
-                    $stats['errors'][] = "bulk/{$docKey}: {$e->getMessage()}";
-                }
-
-                $done++;
-                if ($onProgress) {
-                    $onProgress(round($done / $total * 100), $docKey);
-                }
+                    ],
+                ];
+                $chunkRecordCounts[$docKey] = count($chunk);
             }
+        }
+
+        if ($onProgress) {
+            $onProgress(5, 'uploading');
+        }
+
+        // Fire all chunk writes concurrently (async)
+        $promises = [];
+        foreach ($requests as $docKey => $req) {
+            $promises[$docKey] = $this->http->patchAsync(
+                "{$this->baseUrl}/{$req['path']}",
+                [
+                    'headers' => $this->headers(),
+                    'json' => ['fields' => $this->encodeFields($req['data'])],
+                ]
+            );
+        }
+
+        // Wait for all to complete
+        $results = \GuzzleHttp\Promise\Utils::settle($promises)->wait();
+        foreach ($results as $docKey => $result) {
+            if ($result['state'] === 'fulfilled') {
+                $stats['pushed'] += $chunkRecordCounts[$docKey];
+            } else {
+                $reason = $result['reason'] ?? 'Unknown error';
+                $stats['errors'][] = "bulk/{$docKey}: " . ($reason instanceof \Throwable ? $reason->getMessage() : (string) $reason);
+            }
+        }
+
+        if ($onProgress) {
+            $onProgress(90, 'meta');
         }
 
         // Write meta doc
@@ -1015,26 +1042,42 @@ class FirebaseSyncService
         $totalChunks = array_sum(array_map(fn($v) => is_numeric($v) ? (int) $v : 0, $collections));
         $done = 0;
 
-        // 2. Download ALL chunks first, before truncating local data
-        $allChunks = [];
+        // 2. Download ALL chunks concurrently, before truncating local data
+        $promises = [];
+        $chunkMeta = []; // docKey => collectionName
         foreach ($collections as $name => $chunkCount) {
             $chunkCount = (int) $chunkCount;
             for ($i = 0; $i < $chunkCount; $i++) {
                 $docKey = "{$name}_{$i}";
-                try {
-                    $chunkData = $this->getDocument("_bulk/{$docKey}");
-                    if ($chunkData && !empty($chunkData['records']) && is_array($chunkData['records'])) {
-                        $allChunks[] = ['name' => $name, 'records' => $chunkData['records']];
-                    }
-                } catch (\Throwable $e) {
-                    $stats['errors'][] = "bulk/{$docKey}: {$e->getMessage()}";
-                }
-
-                $done++;
-                if ($onProgress) {
-                    $onProgress(round($done / ($totalChunks + 1) * 50), $docKey); // 0-50% for download
-                }
+                $chunkMeta[$docKey] = $name;
+                $promises[$docKey] = $this->http->getAsync(
+                    "{$this->baseUrl}/_bulk/{$docKey}",
+                    ['headers' => $this->headers()]
+                );
             }
+        }
+
+        if ($onProgress) {
+            $onProgress(10, 'downloading');
+        }
+
+        $results = \GuzzleHttp\Promise\Utils::settle($promises)->wait();
+        $allChunks = [];
+        foreach ($results as $docKey => $result) {
+            if ($result['state'] === 'fulfilled') {
+                $body = json_decode($result['value']->getBody(), true);
+                $fields = $this->decodeFields($body['fields'] ?? []);
+                if (!empty($fields['records']) && is_array($fields['records'])) {
+                    $allChunks[] = ['name' => $chunkMeta[$docKey], 'records' => $fields['records']];
+                }
+            } else {
+                $reason = $result['reason'] ?? 'Unknown error';
+                $stats['errors'][] = "bulk/{$docKey}: " . ($reason instanceof \Throwable ? $reason->getMessage() : (string) $reason);
+            }
+        }
+
+        if ($onProgress) {
+            $onProgress(50, 'importing');
         }
 
         // 3. Only truncate AFTER all chunks downloaded successfully

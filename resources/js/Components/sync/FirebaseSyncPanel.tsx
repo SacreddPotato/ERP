@@ -37,7 +37,7 @@ export default function FirebaseSyncPanel() {
             .replace(':skipped', String(result.skipped ?? 0));
     };
 
-    const syncTimeout = 5 * 60 * 1000; // 5 minutes
+    const syncTimeout = 15 * 60 * 1000; // 15 minutes
 
     const executePull = async () => {
         setSyncing(true); setSyncAction('pull'); setLastResult(null);

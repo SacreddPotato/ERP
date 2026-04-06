@@ -57,6 +57,10 @@ Route::prefix('sync')->group(function () {
     Route::post('/pull', [SyncController::class, 'pull']);
     Route::post('/push', [SyncController::class, 'push']);
     Route::post('/force-pull', [SyncController::class, 'forcePull']);
+    Route::post('/debug-test', [SyncController::class, 'debugTest']);
+    Route::get('/debug-status', [SyncController::class, 'debugStatus']);
+    Route::post('/debug-insert', [SyncController::class, 'debugInsert']);
+    Route::post('/debug-clean', [SyncController::class, 'debugClean']);
 });
 
 // App info & updates
