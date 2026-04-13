@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useLayoutEffect, useMemo, useRef } from 'react';
 
 interface StatCardProps {
     label: string;
@@ -16,19 +16,77 @@ const colorMap = {
     purple: 'from-purple-500 to-purple-600',
 };
 
+function AutoFitValue({ value }: { value: string | number }) {
+    const containerRef = useRef<HTMLDivElement | null>(null);
+    const textRef = useRef<HTMLParagraphElement | null>(null);
+
+    const displayValue = useMemo(
+        () => (typeof value === 'number' ? value.toLocaleString() : String(value)),
+        [value]
+    );
+
+    useLayoutEffect(() => {
+        const container = containerRef.current;
+        const text = textRef.current;
+        if (!container || !text) return;
+
+        const maxFontPx = 20;
+        const minFontPx = 12;
+
+        const fitText = () => {
+            let low = minFontPx;
+            let high = maxFontPx;
+            let best = minFontPx;
+
+            while (low <= high) {
+                const mid = Math.floor((low + high) / 2);
+                text.style.fontSize = `${mid}px`;
+
+                if (text.scrollWidth <= container.clientWidth) {
+                    best = mid;
+                    low = mid + 1;
+                } else {
+                    high = mid - 1;
+                }
+            }
+
+            text.style.fontSize = `${best}px`;
+        };
+
+        fitText();
+
+        const observer = new ResizeObserver(() => {
+            fitText();
+        });
+        observer.observe(container);
+
+        return () => {
+            observer.disconnect();
+        };
+    }, [displayValue]);
+
+    return (
+        <div ref={containerRef} className="w-full min-w-0">
+            <p ref={textRef} className="font-bold text-slate-900 dark:text-slate-100 mt-0.5 leading-tight whitespace-nowrap overflow-hidden">
+                {displayValue}
+            </p>
+        </div>
+    );
+}
+
 export function StatCard({ label, value, icon, color = 'blue' }: StatCardProps) {
     return (
         <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700 p-5 flex items-center gap-4">
-            <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${colorMap[color]} flex items-center justify-center text-white shrink-0`}>
+            <div className={`w-12 h-12 rounded-xl bg-linear-to-br ${colorMap[color]} flex items-center justify-center text-white shrink-0`}>
                 {icon || (
                     <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
                     </svg>
                 )}
             </div>
-            <div className="min-w-0">
+            <div className="min-w-0 flex-1">
                 <p className="text-sm text-slate-500 dark:text-slate-400 truncate">{label}</p>
-                <p className="text-xl font-bold text-slate-900 dark:text-slate-100 mt-0.5">{typeof value === 'number' ? value.toLocaleString() : value}</p>
+                <AutoFitValue value={value} />
             </div>
         </div>
     );

@@ -14,6 +14,38 @@ export default function FirebaseSyncPanel() {
     const [showConfirm, setShowConfirm] = useState(false);
     const [confirmAction, setConfirmAction] = useState('');
 
+    const formatSyncWarning = (warning: string): string => {
+        const [contextPart, ...detailsParts] = warning.split(': ');
+        const details = detailsParts.join(': ').trim();
+
+        const contextTokens = contextPart
+            .split('/')
+            .map((token) => token.trim())
+            .filter(Boolean)
+            .map((token) => token.replace(/[_-]/g, ' '));
+
+        const contextLabel = contextTokens
+            .map((token) => token.charAt(0).toUpperCase() + token.slice(1))
+            .join(' • ');
+
+        const cleanDetails = details
+            .replace(/SQLSTATE\[[^\]]+\]:\s*/g, '')
+            .replace(/\(SQL:\s.+\)$/g, '')
+            .trim();
+
+        if (contextLabel && cleanDetails) {
+            return `${contextLabel}: ${cleanDetails}`;
+        }
+
+        if (contextLabel) {
+            return contextLabel;
+        }
+
+        return warning;
+    };
+
+    const warningMessages = (lastResult?.errors ?? []).map(formatSyncWarning);
+
     const syncMessage = (): string => {
         if (syncAction === 'pull') return t('sync_downloading');
         if (syncAction === 'push') return t('sync_uploading');
@@ -97,8 +129,10 @@ export default function FirebaseSyncPanel() {
                             </svg>
                         </div>
                         <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Cloud Sync</span>
-                        {lastResult && lastResult.errors.length > 0 && !syncing && (
-                            <span className="text-xs text-amber-600">{lastResult.errors.length} warnings</span>
+                        {lastResult && warningMessages.length > 0 && !syncing && (
+                            <span className="text-xs text-amber-600">
+                                {t('sync_warnings_badge').replace(':count', String(warningMessages.length))}
+                            </span>
                         )}
                     </div>
 
@@ -137,6 +171,26 @@ export default function FirebaseSyncPanel() {
                         <div className="w-full bg-slate-200 dark:bg-slate-700 rounded-full h-1.5 overflow-hidden">
                             <div className="h-full bg-gradient-to-r from-indigo-500 to-purple-500 rounded-full animate-progress-indeterminate" />
                         </div>
+                    </div>
+                )}
+
+                {lastResult && warningMessages.length > 0 && !syncing && (
+                    <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 dark:border-amber-700/50 dark:bg-amber-900/20">
+                        <p className="text-xs font-medium text-amber-800 dark:text-amber-300">
+                            {t('sync_warnings_title')}
+                        </p>
+                        <ul className="mt-1 space-y-1">
+                            {warningMessages.slice(0, 5).map((message, idx) => (
+                                <li key={`${idx}-${message}`} className="text-xs text-amber-700 dark:text-amber-200">
+                                    • {message}
+                                </li>
+                            ))}
+                        </ul>
+                        {warningMessages.length > 5 && (
+                            <p className="mt-1 text-xs text-amber-700 dark:text-amber-200">
+                                {t('sync_warnings_more').replace(':count', String(warningMessages.length - 5))}
+                            </p>
+                        )}
                     </div>
                 )}
             </div>

@@ -32,6 +32,9 @@
     "sync_uploaded": "Uploaded :count records to the cloud",
     "sync_replaced": "Replaced local data with :count records from the cloud",
     "sync_no_data": "No new data found in the cloud",
+    "sync_warnings_badge": ":count items need attention",
+    "sync_warnings_title": "Some items could not be synced",
+    "sync_warnings_more": "+:count more items",
     "confirm_push": "This will upload all your local data to the cloud, overwriting any existing cloud data. Continue?",
     "confirm_force_pull": "This will delete ALL your local data and replace it with cloud data. This cannot be undone. Are you sure?",
 
@@ -241,9 +244,6 @@
     "btn_confirm": "Confirm",
     "btn_close": "Close",
 
-    "confirm_reverse_title": "Confirm Reversal",
-    "confirm_reverse_message": "Are you sure you want to reverse this transaction?",
-    "confirm_reverse_warning": "This will create an opposite transaction to negate the original.",
     "reverse_success": "Transaction reversed successfully",
     "reverse_failed": "Failed to reverse transaction",
     "already_reversed": "This transaction has already been reversed",
